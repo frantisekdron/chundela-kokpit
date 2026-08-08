@@ -1,0 +1,14 @@
+{
+  "name": "Produkční kokpit — Chundela × František Dron",
+  "short_name": "Kokpit",
+  "description": "Sdílená nástěnka zakázek: fotky, vizualizace, videa, schvalování.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#14120f",
+  "theme_color": "#14120f",
+  "orientation": "portrait-primary",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
