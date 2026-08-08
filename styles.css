@@ -184,7 +184,31 @@ main { width: var(--w); margin: 0 auto; padding-bottom: 90px; }
 .karta-nadpis h3 { font-size: 16.5px; line-height: 1.25; }
 .karta-nadpis p { margin: 4px 0 0; font-size: 12.5px; color: var(--muted); line-height: 1.4; }
 
+/* ID a datum natáčení — vždy vidět, i když nejsou vyplněné. */
+.udaje {
+  display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 0;
+  font-family: var(--font-mono); font-size: 11px;
+}
+.udaje dt { letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted-2); }
+.udaje dd { margin: 0; color: var(--gold); letter-spacing: 0.04em; }
+.udaje dd i { color: var(--muted-2); font-style: normal; }
+
 .karta-odkazy { display: flex; gap: 7px; }
+
+/* Poslední poznámky rovnou na kartě. */
+.karta-poznamky {
+  display: flex; flex-direction: column; gap: 7px; width: 100%; text-align: left;
+  padding-top: 11px; border-top: 1px solid var(--line);
+}
+.kp { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.kp-text {
+  flex: 1; min-width: 0; font-size: 12.5px; line-height: 1.4; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.karta:hover .kp-text { color: var(--paper); }
+.kp-kdy { flex: none; font-family: var(--font-mono); font-size: 9.5px; color: var(--muted-2); }
+
+.avatar.drobny { width: 17px; height: 17px; font-size: 8px; align-self: center; }
 
 .chip {
   display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0;
@@ -244,6 +268,13 @@ main { width: var(--w); margin: 0 auto; padding-bottom: 90px; }
   padding: 5px 7px; margin: -5px -7px;
 }
 .suplik-hlava .kod-vstup::placeholder { color: var(--muted-2); font-style: normal; }
+
+.sh-datum { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
+.sh-datum label {
+  flex: none; font-family: var(--font-mono); font-size: 10px;
+  letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted-2);
+}
+.suplik-hlava .datum-vstup { flex: 0 1 auto; width: 165px; font-size: 13px; }
 .suplik-telo { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 0 22px 40px; }
 
 .blok { padding: 22px 0; border-bottom: 1px solid var(--line); }

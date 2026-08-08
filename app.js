@@ -20,6 +20,14 @@ const uid = (p) => p + '-' + Math.random().toString(36).slice(2, 9);
 
 const dtPlne = new Intl.DateTimeFormat('cs-CZ', { day: 'numeric', month: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 const dtKratce = new Intl.DateTimeFormat('cs-CZ', { day: 'numeric', month: 'numeric' });
+const dtDen = new Intl.DateTimeFormat('cs-CZ', { day: 'numeric', month: 'numeric', year: 'numeric' });
+
+/* Datum natáčení je uložené jako 2026-07-30, ukazuje se jako 30. 7. 2026. */
+function denCesky(datum) {
+  if (!datum) return '';
+  const d = new Date(datum + 'T12:00:00');
+  return Number.isNaN(d.getTime()) ? datum : dtDen.format(d);
+}
 
 function kdyKratce(iso) {
   const d = new Date(iso);
@@ -244,6 +252,8 @@ function normalizuj(z) {
     delete z.dalsiOdkazy;
   }
   z.odkazy = z.odkazy || [];
+  z.nataceno = z.nataceno ?? z.terminNataceni ?? '';
+  delete z.terminNataceni;
   z.videa = (z.videa || []).map((v) => ({
     id: v.id, nazev: v.nazev, format: v.format === '9:16' ? '9:16' : '16:9',
     vimeo: v.vimeo || '', popis: v.popis ?? v.poznamka ?? '',
@@ -342,21 +352,26 @@ function karta(z) {
 
   /* Náhled se ukáže, jen když je z čeho. Bez videa by z karty
      byl obří prázdný obdélník, tak zůstane kompaktní. */
+  const posledni = komentareZ(z.id).slice().sort((a, b) => b.kdy.localeCompare(a.kdy)).slice(0, 3);
+
   return `
     <article class="karta">
       ${info ? `
         <button class="karta-nahled" data-akce="otevri" data-id="${esc(z.id)}"
                 data-nahled="${esc(info.id)}" data-hash="${esc(info.hash || '')}"
-                aria-label="Otevřít ${esc(z.nazev)}"></button>
-        ${z.kod ? `<span class="karta-kod">${esc(z.kod)}</span>` : ''}` : ''}
-      ${maNove(z) ? '<span class="karta-nove" title="Nový komentář"></span>' : ''}
+                aria-label="Otevřít ${esc(z.nazev)}"></button>` : ''}
+      ${maNove(z) ? '<span class="karta-nove" title="Nová poznámka"></span>' : ''}
 
       <div class="karta-telo">
         <button class="karta-nadpis" data-akce="otevri" data-id="${esc(z.id)}">
-          ${info || !z.kod ? '' : `<span class="kod">${esc(z.kod)}</span>`}
           <h3>${esc(z.nazev)}</h3>
           ${z.podnazev ? `<p>${esc(z.podnazev)}</p>` : ''}
         </button>
+
+        <dl class="udaje">
+          <dt>ID</dt><dd>${z.kod ? esc(z.kod) : '<i>nevyplněno</i>'}</dd>
+          <dt>Natáčeno</dt><dd>${z.nataceno ? esc(denCesky(z.nataceno)) : '<i>nevyplněno</i>'}</dd>
+        </dl>
 
         <div class="karta-odkazy">
           ${chipOdkaz('i-foto', 'Fotky', z.fotky, z.id, 'fotky')}
@@ -368,6 +383,16 @@ function karta(z) {
           <span class="${vysoka ? 'ma' : ''}">${vysoka}× REELS</span>
           ${komentaru ? `<span class="vpravo"><svg class="icon"><use href="#i-komentar"/></svg>${komentaru}</span>` : ''}
         </footer>
+
+        ${posledni.length ? `
+          <button class="karta-poznamky" data-akce="otevri" data-id="${esc(z.id)}">
+            ${posledni.map((k) => `
+              <span class="kp">
+                <span class="avatar drobny ${k.role === 'klient' ? 'klient' : ''}">${esc(iniciely(k.kdo))}</span>
+                <span class="kp-text">${esc(k.text)}</span>
+                <span class="kp-kdy">${esc(kdyKratce(k.kdy))}</span>
+              </span>`).join('')}
+          </button>` : ''}
       </div>
     </article>`;
 }
@@ -427,6 +452,10 @@ function htmlDetail(z) {
       </div>
       <h2><input class="vstup" data-pole="nazev" value="${esc(z.nazev)}" style="font:inherit" aria-label="Název zakázky"></h2>
       <input class="vstup" data-pole="podnazev" value="${esc(z.podnazev || '')}" placeholder="Dispozice, lokalita, plocha…" style="color:var(--muted);font-size:13px" aria-label="Popis zakázky">
+      <div class="sh-datum">
+        <label for="p-nataceno">Natáčeno</label>
+        <input class="vstup datum-vstup" id="p-nataceno" type="date" data-pole="nataceno" value="${esc(z.nataceno || '')}">
+      </div>
     </div>
 
     <div class="suplik-telo">
@@ -768,6 +797,7 @@ async function novaZakazka() {
     pole: [
       { klic: 'nazev', label: 'Název', hodnota: '', placeholder: 'Např. Vinohrady — Bělehradská' },
       { klic: 'podnazev', label: 'Popis', hodnota: '', placeholder: 'Např. Byt 3+kk · 92 m² · Praha 2' },
+      { klic: 'nataceno', label: 'Natáčeno', typ: 'date', hodnota: '' },
       {
         klic: 'kod', label: 'ID zakázky',
         hodnota: `${rok}-${String(cislo).padStart(2, '0')}`,
@@ -783,6 +813,7 @@ async function novaZakazka() {
     kod: v.kod,
     nazev: v.nazev,
     podnazev: v.podnazev,
+    nataceno: v.nataceno,
     stav: 'aktivni',
     fotky: '',
     vizualizace: '',
@@ -801,7 +832,7 @@ async function ulozPole(prvek) {
   if (!z) return;
   const klic = prvek.dataset.pole;
   if (String(z[klic] ?? '') === prvek.value) return;
-  const nazvy = { nazev: 'název', podnazev: 'popis', poznamka: 'poznámku', kod: 'ID zakázky' };
+  const nazvy = { nazev: 'název', podnazev: 'popis', poznamka: 'poznámku', kod: 'ID zakázky', nataceno: 'datum natáčení' };
   await ulozZakazku(`${stitek(z)} — ${nazvy[klic] || klic}`, z.id, (x) => { x[klic] = prvek.value; });
 }
 
