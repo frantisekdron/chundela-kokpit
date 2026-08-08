@@ -1017,10 +1017,21 @@ async function akceNaZakazce(akce, prvek, z) {
       uprava: `poslal video „${v.nazev}" k úpravám`,
       vyroba: `vrátil video „${v.nazev}" do výroby`,
     };
+    /* Video, které čeká na někoho, nesmí uváznout v archivu —
+       zakázka se vrátí mezi aktivní, ať to vyskočí ve volacím listu. */
+    const probrat = cil.stav === 'uprava' || cil.stav === 'ke_schvaleni';
+    const oziva = probrat && z.stav === 'archiv';
+
     await uloz(`${z.kod} — ${v.nazev}: ${STAVY_VIDEA[cil.stav]}`,
-      upravZak(z.id, (x) => { x.videa.find((y) => y.id === v.id).stav = cil.stav; }),
+      upravZak(z.id, (x) => {
+        x.videa.find((y) => y.id === v.id).stav = cil.stav;
+        if (probrat && x.stav === 'archiv') x.stav = 'aktivni';
+        if (probrat && x.faze === 'hotovo') x.faze = cil.stav === 'uprava' ? 'strih' : 'schvaleni';
+      }),
       { zakazka: z.id, cil: v.id, typ: cil.stav === 'odevzdano' ? 'schvaleni' : 'zmena', text: popisy[cil.stav] + (poznamka ? ':\n' + poznamka : '') });
-    if (cil.stav === 'odevzdano') hlaska('Schváleno. Studio to uvidí ve volacím listu.', 'uspech');
+
+    if (oziva) hlaska('Zakázka se vrátila mezi aktivní.', 'uspech');
+    else if (cil.stav === 'odevzdano') hlaska('Schváleno. Studio to uvidí ve volacím listu.', 'uspech');
     return;
   }
 
