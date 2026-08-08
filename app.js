@@ -130,13 +130,40 @@ const GH = {
 
   cesta: (soubor) => `/repos/${CFG.owner}/${CFG.repo}/contents/${soubor}`,
 
+  /* GitHub u přístupových klíčů schválně nerozlišuje „nemáš právo"
+     a „neexistuje" — obojí vrátí 404. Doptáme se tedy na repozitář
+     a řekneme rovnou, co je špatně a kde to opravit. */
   async chyba(r) {
-    if (r.status === 401) return 'GitHub odmítl přístup — klíč vypršel nebo byl zrušen. Ozvi se Frantovi.';
-    if (r.status === 403) return 'GitHub přístup zamítl. Klíč nemá právo zapisovat.';
-    if (r.status === 404) return 'Datový soubor se nenašel. Zkontroluj nastavení repozitáře.';
+    if (r.status === 401) return 'Přístupový klíč vypršel nebo byl zrušen. Vyrob nový přes nastav_pristup.py.';
+    if (r.status === 403 || r.status === 404) {
+      const potize = await GH.procNejde();
+      if (potize) return potize;
+    }
     let detail = '';
     try { detail = (await r.json()).message || ''; } catch {}
     return `GitHub vrátil chybu ${r.status}. ${detail}`;
+  },
+
+  /* Chyba si nese stavový kód, ať se na ni dá reagovat bez hádání z textu. */
+  async selhalo(r) {
+    const e = new Error(await GH.chyba(r));
+    e.stav = r.status;
+    return e;
+  },
+
+  async procNejde() {
+    try {
+      const r = await GH.volej(`/repos/${CFG.owner}/${CFG.repo}`);
+      if (r.status === 404) {
+        return `Přístupový klíč nevidí repozitář ${CFG.owner}/${CFG.repo}. V nastavení klíče na GitHubu musí být pod Repository access vybraný právě tenhle repozitář.`;
+      }
+      if (!r.ok) return null;
+      const repo = await r.json();
+      if (repo.permissions && !repo.permissions.push) {
+        return 'Přístupový klíč umí data jen číst, ne zapisovat. Na GitHubu v nastavení klíče přepni Repository permissions → Contents na „Read and write".';
+      }
+      return null;
+    } catch { return null; }
   },
 
   async nacti(soubor, { podminene = false } = {}) {
@@ -144,7 +171,7 @@ const GH = {
     if (podminene && GH.etag[soubor]) hlavicky['If-None-Match'] = GH.etag[soubor];
     const r = await GH.volej(`${GH.cesta(soubor)}?ref=${CFG.branch}`, { headers: hlavicky });
     if (r.status === 304) return { zmeneno: false };
-    if (!r.ok) throw new Error(await GH.chyba(r));
+    if (!r.ok) throw await GH.selhalo(r);
     const et = r.headers.get('etag');
     if (et) GH.etag[soubor] = et;
     const j = await r.json();
@@ -176,7 +203,7 @@ const GH = {
         GH.mezipamet[soubor] = { data: kopie, sha: j.content.sha };
         return kopie;
       }
-      if (r.status !== 409 && r.status !== 422) throw new Error(await GH.chyba(r));
+      if (r.status !== 409 && r.status !== 422) throw await GH.selhalo(r);
       await pauza(250 * (pokus + 1));
     }
     throw new Error('Nepovedlo se uložit — někdo jiný právě ukládá to samé. Zkus to za chvíli.');
@@ -821,7 +848,7 @@ async function spust(token, role, jmeno) {
       vykresli();
     }
   } catch (e) {
-    if (/odmítl přístup/.test(e.message)) return odhlas(e.message);
+    if (e.stav === 401) return odhlas(e.message);
     hlaska(e.message, 'chyba');
   }
 
