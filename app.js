@@ -187,7 +187,7 @@ const GH = {
 
 const JA = { role: null, jmeno: null };
 const S = { zakazky: [], komentare: [] };
-const UI = { filtr: localStorage.getItem('kokpit.filtr') || 'aktivni', hledat: '', otevrena: null, ukladam: 0 };
+const UI = { filtr: localStorage.getItem('kokpit.filtr') || 'aktivni', hledat: '', otevrena: null, ukladam: 0, hraje: new Set() };
 
 const videno = JSON.parse(localStorage.getItem('kokpit.videno') || '{}');
 const ulozVideno = () => localStorage.setItem('kokpit.videno', JSON.stringify(videno));
@@ -239,6 +239,9 @@ async function uloz(zprava, kam, uprav) {
     vykresli();
     return true;
   } catch (e) {
+    /* Po neúspěchu zahodit ETag, jinak by další synchronizace dostala 304
+       a aplikace by natrvalo zůstala u zastaralých dat. */
+    delete GH.etag[kam];
     hlaska(e.message || 'Uložení se nepovedlo.', 'chyba');
     return false;
   } finally {
@@ -303,18 +306,20 @@ function karta(z) {
   const vysoka = z.videa.filter((v) => v.format === '9:16').length;
   const komentaru = komentareZ(z.id).length;
 
+  /* Náhled se ukáže, jen když je z čeho. Bez videa by z karty
+     byl obří prázdný obdélník, tak zůstane kompaktní. */
   return `
     <article class="karta">
-      <button class="karta-nahled ${info ? '' : 'bez'}" data-akce="otevri" data-id="${esc(z.id)}"
-              ${info ? `data-nahled="${esc(info.id)}" data-hash="${esc(info.hash || '')}"` : ''}
-              aria-label="Otevřít ${esc(z.nazev)}">
-        ${info ? '' : '<span>Zatím bez videa</span>'}
-      </button>
-      <span class="karta-kod">${esc(z.kod)}</span>
+      ${info ? `
+        <button class="karta-nahled" data-akce="otevri" data-id="${esc(z.id)}"
+                data-nahled="${esc(info.id)}" data-hash="${esc(info.hash || '')}"
+                aria-label="Otevřít ${esc(z.nazev)}"></button>
+        <span class="karta-kod">${esc(z.kod)}</span>` : ''}
       ${maNove(z) ? '<span class="karta-nove" title="Nový komentář"></span>' : ''}
 
       <div class="karta-telo">
         <button class="karta-nadpis" data-akce="otevri" data-id="${esc(z.id)}">
+          ${info ? '' : `<span class="kod">${esc(z.kod)}</span>`}
           <h3>${esc(z.nazev)}</h3>
           ${z.podnazev ? `<p>${esc(z.podnazev)}</p>` : ''}
         </button>
@@ -399,11 +404,11 @@ function htmlDetail(z) {
         <div class="odkazy">
           ${dlazdiceOdkaz('i-foto', 'Fotky', z.fotky, 'fotky')}
           ${dlazdiceOdkaz('i-kostka', 'Vizualizace', z.vizualizace, 'vizualizace')}
-          ${z.odkazy.map((o, i) => `
+          ${z.odkazy.map((o) => `
             <a class="chip" href="${esc(o.url)}" target="_blank" rel="noopener">
               <svg class="icon"><use href="#i-odkaz"/></svg>
               <span>${esc(o.nazev)}<small>otevřít</small></span>
-              <span class="zmenit" data-akce="smazat-odkaz" data-i="${i}" role="button" tabindex="0" title="Odebrat"><svg class="icon"><use href="#i-krizek"/></svg></span>
+              <span class="zmenit" data-akce="smazat-odkaz" data-url="${esc(o.url)}" role="button" tabindex="0" title="Odebrat"><svg class="icon"><use href="#i-krizek"/></svg></span>
             </a>`).join('')}
         </div>
       </div>
@@ -460,9 +465,11 @@ function videoKarta(v) {
     <div class="video-karta ${v.format === '9:16' ? 'w916' : 'w169'}">
       ${info
         ? `<div class="vk-ramecek">
-             <button class="vk-prehrat" data-akce="prehrat" data-vid="${esc(v.id)}" data-nahled="${esc(info.id)}" data-hash="${esc(info.hash || '')}" aria-label="Přehrát ${esc(v.nazev)}">
-               <span class="kolecko"><svg class="icon"><use href="#i-prehrat"/></svg></span>
-             </button>
+             ${UI.hraje.has(v.id)
+               ? `<iframe src="${esc(info.embed)}" allow="fullscreen; picture-in-picture" allowfullscreen title="${esc(v.nazev)}"></iframe>`
+               : `<button class="vk-prehrat" data-akce="prehrat" data-vid="${esc(v.id)}" data-nahled="${esc(info.id)}" data-hash="${esc(info.hash || '')}" aria-label="Přehrát ${esc(v.nazev)}">
+                    <span class="kolecko"><svg class="icon"><use href="#i-prehrat"/></svg></span>
+                  </button>`}
            </div>`
         : `<button class="vk-bezodkazu" data-akce="video-upravit" data-vid="${esc(v.id)}">
              <svg class="icon"><use href="#i-odkaz"/></svg>
@@ -499,6 +506,12 @@ const zpravaHtml = (k) => `
 /* ---------------------------------------------------------- šuplík */
 
 function otevri(id) {
+  /* Jiná zakázka = čistý šuplík. Jinak by se rozepsaný komentář
+     přenesl k cizí zakázce. */
+  if (UI.otevrena !== id) {
+    $('#suplik').innerHTML = '';
+    UI.hraje.clear();
+  }
   UI.otevrena = id;
   videno[id] = nyni();
   ulozVideno();
@@ -513,6 +526,7 @@ function otevri(id) {
 
 function zavri() {
   UI.otevrena = null;
+  UI.hraje.clear();
   $('#suplik').classList.remove('otevreno');
   $('#suplik').setAttribute('aria-hidden', 'true');
   $('#zaves').classList.remove('otevreno');
@@ -604,7 +618,7 @@ async function akce(jmeno, prvek) {
 
   if (jmeno === 'prehodit') {
     const hotove = z.stav === 'aktivni';
-    await ulozZakazku(`${z.kod} — ${hotove ? 'hotové' : 'zpět mezi aktivní'}`, z.id, (x) => { x.stav = hotove ? 'hotove' : 'aktivni'; });
+    if (!await ulozZakazku(`${z.kod} — ${hotove ? 'hotové' : 'zpět mezi aktivní'}`, z.id, (x) => { x.stav = hotove ? 'hotove' : 'aktivni'; })) return;
     UI.filtr = hotove ? 'hotove' : 'aktivni';
     localStorage.setItem('kokpit.filtr', UI.filtr);
     vykresli();
@@ -623,8 +637,14 @@ async function akce(jmeno, prvek) {
     return ulozZakazku(`${z.kod} — přidán odkaz`, z.id, (x) => { (x.odkazy = x.odkazy || []).push({ nazev: v.nazev || 'Odkaz', url: v.url }); });
   }
 
+  /* Mazat podle adresy, ne podle pořadí — po sloučení s cizí verzí
+     by index ukazoval na úplně jiný odkaz. */
   if (jmeno === 'smazat-odkaz') {
-    return ulozZakazku(`${z.kod} — odebrán odkaz`, z.id, (x) => { x.odkazy.splice(Number(d.i), 1); });
+    return ulozZakazku(`${z.kod} — odebrán odkaz`, z.id, (x) => {
+      const i = (x.odkazy || []).findIndex((o) => o.url === d.url);
+      if (i < 0) throw new Error('Tenhle odkaz už mezitím někdo odebral.');
+      x.odkazy.splice(i, 1);
+    });
   }
 
   if (jmeno === 'pridat-video' || jmeno === 'video-upravit') {
@@ -642,7 +662,11 @@ async function akce(jmeno, prvek) {
     if (data.vimeo && !vimeoInfo(data.vimeo)) return hlaska('Tenhle odkaz nevypadá jako Vimeo. Zkontroluj ho.', 'chyba');
 
     return v
-      ? ulozZakazku(`${z.kod} — upraveno video ${data.nazev}`, z.id, (x) => { Object.assign(x.videa.find((y) => y.id === v.id), data); })
+      ? ulozZakazku(`${z.kod} — upraveno video ${data.nazev}`, z.id, (x) => {
+          const cil = (x.videa || []).find((y) => y.id === v.id);
+          if (!cil) throw new Error('Tohle video už mezitím někdo smazal.');
+          Object.assign(cil, data);
+        })
       : ulozZakazku(`${z.kod} — přidáno video ${data.nazev}`, z.id, (x) => { (x.videa = x.videa || []).push({ id: uid('v'), ...data }); });
   }
 
@@ -655,6 +679,7 @@ async function akce(jmeno, prvek) {
   if (jmeno === 'prehrat') {
     const info = vimeoInfo(z.videa.find((x) => x.id === d.vid)?.vimeo);
     if (!info) return;
+    UI.hraje.add(d.vid);  /* ať přehrávač přežije překreslení šuplíku */
     prvek.closest('.vk-ramecek').innerHTML =
       `<iframe src="${esc(info.embed)}&autoplay=1" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen title="video"></iframe>`;
     return;
@@ -665,6 +690,7 @@ async function akce(jmeno, prvek) {
     const text = pole.value.trim();
     if (!text) return;
     pole.value = '';
+    pole.blur();  /* jinak by strážce fokusu zablokoval překreslení a komentář by se neukázal */
     const ok = await uloz(`${z.kod} — komentář`, SOUBOR_KOMENTARE, (dd) => {
       dd.polozky.push({ id: uid('k'), kdy: nyni(), kdo: JA.jmeno, role: JA.role, zakazka: z.id, text });
       if (dd.polozky.length > 800) dd.polozky = dd.polozky.slice(-800);
@@ -850,6 +876,13 @@ document.addEventListener('change', (e) => { if (e.target.matches('[data-pole]')
 document.addEventListener('input', (e) => { if (e.target.matches('#suplik textarea')) dorovnej(e.target); });
 
 document.addEventListener('keydown', (e) => {
+  /* Tužka a křížek u odkazů jsou spany uvnitř <a>, takže je musíme
+     na klávesnici aktivovat sami. */
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches?.('[data-akce][role="button"]')) {
+    e.preventDefault();
+    e.stopPropagation();
+    return akce(e.target.dataset.akce, e.target);
+  }
   if (e.key === 'Escape' && UI.otevrena && !$('#dlg').open) zavri();
   if (e.key === '/' && document.activeElement === document.body) { e.preventDefault(); $('#hledat').focus(); }
   if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && e.target.id === 'novy-komentar') akce('komentar', e.target);

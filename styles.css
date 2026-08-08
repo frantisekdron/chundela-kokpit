@@ -12,12 +12,12 @@
   --line-hi:    #514a43;
   --gold:       #d2ba8a;
   --gold-hi:    #ecdcb8;
-  --gold-dim:   #8a7a58;
+  --gold-dim:   #97865f;
   --gold-ghost: rgba(210, 186, 138, 0.12);
   --teal:       #7ebec5;
   --paper:      #f4f4f4;
   --muted:      #9a9188;
-  --muted-2:    #6f6862;
+  --muted-2:    #8a837c;
   --sage:       #86a87d;
   --rust:       #c4685a;
 
@@ -159,18 +159,12 @@ main { width: var(--w); margin: 0 auto; padding-bottom: 90px; }
   background: var(--ink-3); overflow: hidden; text-align: left;
 }
 .karta-nahled img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.karta-nahled.bez {
-  background: repeating-linear-gradient(45deg, var(--ink-3) 0 10px, var(--ink-2) 10px 20px);
-  display: grid; place-items: center;
-}
-.karta-nahled.bez span { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted-2); }
 
 .karta-nahled::after {
   content: ""; position: absolute; inset: 0;
   background: linear-gradient(180deg, transparent 45%, rgba(20, 18, 15, 0.85));
   pointer-events: none;
 }
-.karta-nahled.bez::after { display: none; }
 
 .karta-kod {
   position: absolute; top: 11px; left: 12px; z-index: 1;
@@ -186,6 +180,7 @@ main { width: var(--w); margin: 0 auto; padding-bottom: 90px; }
 
 .karta-telo { padding: 14px 15px 15px; display: flex; flex-direction: column; gap: 12px; flex: 1; }
 .karta-nadpis { text-align: left; width: 100%; }
+.karta-nadpis .kod { display: block; margin-bottom: 5px; }
 .karta-nadpis h3 { font-size: 16.5px; line-height: 1.25; }
 .karta-nadpis p { margin: 4px 0 0; font-size: 12.5px; color: var(--muted); line-height: 1.4; }
 
@@ -349,8 +344,12 @@ textarea.vstup {
 .zprava-kdy { font-family: var(--font-mono); font-size: 10px; color: var(--muted-2); }
 .zprava-text { font-size: 13.5px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
 .zprava .smazat { align-self: flex-start; color: var(--muted-2); font-size: 12px; opacity: 0; padding: 3px; transition: opacity 0.15s var(--ease), color 0.15s var(--ease); }
-.zprava:hover .smazat { opacity: 1; }
+.zprava:hover .smazat,
+.zprava:focus-within .smazat { opacity: 1; }
 .zprava .smazat:hover { color: var(--rust); }
+
+/* Na dotykovém displeji není hover — tlačítko musí být vidět rovnou. */
+@media (hover: none) { .zprava .smazat { opacity: 1; } }
 
 .prazdna-poznamka { font-size: 13.5px; color: var(--muted-2); font-style: italic; margin: 0; }
 
