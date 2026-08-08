@@ -236,6 +236,14 @@ main { width: var(--w); margin: 0 auto; padding-bottom: 90px; }
 .sh-radek { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
 .sh-radek .rozpera { flex: 1; }
 .suplik-hlava h2 { font-size: 21px; line-height: 1.2; }
+
+/* Dvě třídy schválně — musí to přebít width:100 % z .vstup, které je v souboru níž. */
+.suplik-hlava .kod-vstup {
+  flex: 0 1 auto; width: 160px; min-width: 0;
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.06em; color: var(--gold-dim);
+  padding: 5px 7px; margin: -5px -7px;
+}
+.suplik-hlava .kod-vstup::placeholder { color: var(--muted-2); font-style: normal; }
 .suplik-telo { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 0 22px 40px; }
 
 .blok { padding: 22px 0; border-bottom: 1px solid var(--line); }

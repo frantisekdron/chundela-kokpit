@@ -225,6 +225,8 @@ const videno = JSON.parse(localStorage.getItem('kokpit.videno') || '{}');
 const ulozVideno = () => localStorage.setItem('kokpit.videno', JSON.stringify(videno));
 
 const najdi = (id) => S.zakazky.find((z) => z.id === id);
+/* Čím zakázku pojmenovat v historii změn — ID, a když chybí, tak název. */
+const stitek = (z) => z.kod || z.nazev;
 const komentareZ = (id) => S.komentare.filter((k) => k.zakazka === id);
 
 /* Starší tvar dat umí přečíst i tenhle zjednodušený kokpit. */
@@ -346,12 +348,12 @@ function karta(z) {
         <button class="karta-nahled" data-akce="otevri" data-id="${esc(z.id)}"
                 data-nahled="${esc(info.id)}" data-hash="${esc(info.hash || '')}"
                 aria-label="Otevřít ${esc(z.nazev)}"></button>
-        <span class="karta-kod">${esc(z.kod)}</span>` : ''}
+        ${z.kod ? `<span class="karta-kod">${esc(z.kod)}</span>` : ''}` : ''}
       ${maNove(z) ? '<span class="karta-nove" title="Nový komentář"></span>' : ''}
 
       <div class="karta-telo">
         <button class="karta-nadpis" data-akce="otevri" data-id="${esc(z.id)}">
-          ${info ? '' : `<span class="kod">${esc(z.kod)}</span>`}
+          ${info || !z.kod ? '' : `<span class="kod">${esc(z.kod)}</span>`}
           <h3>${esc(z.nazev)}</h3>
           ${z.podnazev ? `<p>${esc(z.podnazev)}</p>` : ''}
         </button>
@@ -418,7 +420,7 @@ function htmlDetail(z) {
   return `
     <div class="suplik-hlava">
       <div class="sh-radek">
-        <span class="kod">${esc(z.kod)}</span>
+        <input class="vstup kod-vstup" data-pole="kod" value="${esc(z.kod || '')}" placeholder="ID zakázky" aria-label="ID zakázky">
         <span class="rozpera"></span>
         <button class="mini" data-akce="prehodit">${z.stav === 'aktivni' ? 'Označit jako hotové' : 'Vrátit mezi aktivní'}</button>
         <button class="ikonbtn" data-akce="zavri" aria-label="Zavřít"><svg class="icon"><use href="#i-krizek"/></svg></button>
@@ -647,7 +649,7 @@ async function akce(jmeno, prvek) {
       pole: [{ klic: 'url', label: 'Odkaz', typ: 'url', hodnota: z[d.klic] || '', placeholder: 'https://…' }],
     });
     if (!v) return;
-    return ulozZakazku(`${z.kod} — ${popis.toLowerCase()}`, z.id, (x) => { x[d.klic] = v.url; });
+    return ulozZakazku(`${stitek(z)} — ${popis.toLowerCase()}`, z.id, (x) => { x[d.klic] = v.url; });
   }
 
   const z = najdi(UI.otevrena);
@@ -655,7 +657,7 @@ async function akce(jmeno, prvek) {
 
   if (jmeno === 'prehodit') {
     const hotove = z.stav === 'aktivni';
-    if (!await ulozZakazku(`${z.kod} — ${hotove ? 'hotové' : 'zpět mezi aktivní'}`, z.id, (x) => { x.stav = hotove ? 'hotove' : 'aktivni'; })) return;
+    if (!await ulozZakazku(`${stitek(z)} — ${hotove ? 'hotové' : 'zpět mezi aktivní'}`, z.id, (x) => { x.stav = hotove ? 'hotove' : 'aktivni'; })) return;
     UI.filtr = hotove ? 'hotove' : 'aktivni';
     localStorage.setItem('kokpit.filtr', UI.filtr);
     vykresli();
@@ -671,13 +673,13 @@ async function akce(jmeno, prvek) {
       ],
     });
     if (!v?.url) return;
-    return ulozZakazku(`${z.kod} — přidán odkaz`, z.id, (x) => { (x.odkazy = x.odkazy || []).push({ nazev: v.nazev || 'Odkaz', url: v.url }); });
+    return ulozZakazku(`${stitek(z)} — přidán odkaz`, z.id, (x) => { (x.odkazy = x.odkazy || []).push({ nazev: v.nazev || 'Odkaz', url: v.url }); });
   }
 
   /* Mazat podle adresy, ne podle pořadí — po sloučení s cizí verzí
      by index ukazoval na úplně jiný odkaz. */
   if (jmeno === 'smazat-odkaz') {
-    return ulozZakazku(`${z.kod} — odebrán odkaz`, z.id, (x) => {
+    return ulozZakazku(`${stitek(z)} — odebrán odkaz`, z.id, (x) => {
       const i = (x.odkazy || []).findIndex((o) => o.url === d.url);
       if (i < 0) throw new Error('Tenhle odkaz už mezitím někdo odebral.');
       x.odkazy.splice(i, 1);
@@ -699,18 +701,18 @@ async function akce(jmeno, prvek) {
     if (data.vimeo && !vimeoInfo(data.vimeo)) return hlaska('Tenhle odkaz nevypadá jako Vimeo. Zkontroluj ho.', 'chyba');
 
     return v
-      ? ulozZakazku(`${z.kod} — upraveno video ${data.nazev}`, z.id, (x) => {
+      ? ulozZakazku(`${stitek(z)} — upraveno video ${data.nazev}`, z.id, (x) => {
           const cil = (x.videa || []).find((y) => y.id === v.id);
           if (!cil) throw new Error('Tohle video už mezitím někdo smazal.');
           Object.assign(cil, data);
         })
-      : ulozZakazku(`${z.kod} — přidáno video ${data.nazev}`, z.id, (x) => { (x.videa = x.videa || []).push({ id: uid('v'), ...data }); });
+      : ulozZakazku(`${stitek(z)} — přidáno video ${data.nazev}`, z.id, (x) => { (x.videa = x.videa || []).push({ id: uid('v'), ...data }); });
   }
 
   if (jmeno === 'video-smazat') {
     const v = z.videa.find((x) => x.id === d.vid);
     if (!v || !await potvrd({ titulek: 'Smazat video?', popis: `„${v.nazev}" zmizí z kokpitu. Soubor na Vimeu zůstane, kde je.`, okText: 'Smazat' })) return;
-    return ulozZakazku(`${z.kod} — smazáno video ${v.nazev}`, z.id, (x) => { x.videa = x.videa.filter((y) => y.id !== v.id); });
+    return ulozZakazku(`${stitek(z)} — smazáno video ${v.nazev}`, z.id, (x) => { x.videa = x.videa.filter((y) => y.id !== v.id); });
   }
 
   if (jmeno === 'prehrat') {
@@ -728,7 +730,7 @@ async function akce(jmeno, prvek) {
     if (!text) return;
     pole.value = '';
     pole.blur();  /* jinak by strážce fokusu zablokoval překreslení a komentář by se neukázal */
-    const ok = await uloz(`${z.kod} — komentář`, SOUBOR_KOMENTARE, (dd) => {
+    const ok = await uloz(`${stitek(z)} — komentář`, SOUBOR_KOMENTARE, (dd) => {
       dd.polozky.push({ id: uid('k'), kdy: nyni(), kdo: JA.jmeno, role: JA.role, zakazka: z.id, text });
       if (dd.polozky.length > 800) dd.polozky = dd.polozky.slice(-800);
     });
@@ -738,7 +740,7 @@ async function akce(jmeno, prvek) {
 
   if (jmeno === 'smazat-komentar') {
     if (!await potvrd({ titulek: 'Smazat komentář?', okText: 'Smazat' })) return;
-    return uloz(`${z.kod} — smazán komentář`, SOUBOR_KOMENTARE, (dd) => { dd.polozky = dd.polozky.filter((k) => k.id !== d.kid); });
+    return uloz(`${stitek(z)} — smazán komentář`, SOUBOR_KOMENTARE, (dd) => { dd.polozky = dd.polozky.filter((k) => k.id !== d.kid); });
   }
 
   if (jmeno === 'smazat-zakazku') {
@@ -747,27 +749,38 @@ async function akce(jmeno, prvek) {
       popis: `„${z.nazev}" zmizí i s videi a komentáři. Zůstane v historii na GitHubu, odkud ji Franta umí vrátit.`,
       okText: 'Smazat',
     })) return;
-    const ok = await uloz(`Smazána zakázka ${z.kod} — ${z.nazev}`, SOUBOR_ZAKAZKY, (dd) => { dd.zakazky = dd.zakazky.filter((x) => x.id !== z.id); });
+    const ok = await uloz(`Smazána zakázka ${stitek(z)} — ${z.nazev}`, SOUBOR_ZAKAZKY, (dd) => { dd.zakazky = dd.zakazky.filter((x) => x.id !== z.id); });
     if (ok) { zavri(); hlaska('Zakázka smazána.', 'uspech'); }
   }
 }
 
 async function novaZakazka() {
+  /* Návrh navazuje na nejvyšší dosud použité číslo, ne na počet zakázek —
+     jinak by po smazání začal nabízet čísla, která už existují. */
+  const rok = String(new Date().getFullYear()).slice(2);
+  const cislo = 1 + Math.max(0, ...S.zakazky
+    .map((z) => /^(\d{2})-(\d+)$/.exec(z.kod || ''))
+    .filter((m) => m && m[1] === rok)
+    .map((m) => Number(m[2])));
+
   const v = await dialog({
     titulek: 'Nová zakázka',
     pole: [
       { klic: 'nazev', label: 'Název', hodnota: '', placeholder: 'Např. Vinohrady — Bělehradská' },
       { klic: 'podnazev', label: 'Popis', hodnota: '', placeholder: 'Např. Byt 3+kk · 92 m² · Praha 2' },
+      {
+        klic: 'kod', label: 'ID zakázky',
+        hodnota: `${rok}-${String(cislo).padStart(2, '0')}`,
+        napoveda: 'Předvyplněné je jen naše pořadové číslo — klidně přepiš vlastním. Jde změnit i později.',
+      },
     ],
     okText: 'Založit',
   });
   if (!v?.nazev) return;
 
-  const rok = String(new Date().getFullYear()).slice(2);
-  const cislo = S.zakazky.filter((z) => (z.kod || '').startsWith(rok + '-')).length + 1;
   const nova = {
     id: uid('z'),
-    kod: `${rok}-${String(cislo).padStart(2, '0')}`,
+    kod: v.kod,
     nazev: v.nazev,
     podnazev: v.podnazev,
     stav: 'aktivni',
@@ -780,7 +793,7 @@ async function novaZakazka() {
   };
   UI.filtr = 'aktivni';
   localStorage.setItem('kokpit.filtr', UI.filtr);
-  if (await uloz(`Nová zakázka ${nova.kod} — ${nova.nazev}`, SOUBOR_ZAKAZKY, (d) => { d.zakazky.unshift(nova); })) otevri(nova.id);
+  if (await uloz(`Nová zakázka ${stitek(nova)}`, SOUBOR_ZAKAZKY, (d) => { d.zakazky.unshift(nova); })) otevri(nova.id);
 }
 
 async function ulozPole(prvek) {
@@ -788,8 +801,8 @@ async function ulozPole(prvek) {
   if (!z) return;
   const klic = prvek.dataset.pole;
   if (String(z[klic] ?? '') === prvek.value) return;
-  const nazvy = { nazev: 'název', podnazev: 'popis', poznamka: 'poznámku' };
-  await ulozZakazku(`${z.kod} — ${nazvy[klic] || klic}`, z.id, (x) => { x[klic] = prvek.value; });
+  const nazvy = { nazev: 'název', podnazev: 'popis', poznamka: 'poznámku', kod: 'ID zakázky' };
+  await ulozZakazku(`${stitek(z)} — ${nazvy[klic] || klic}`, z.id, (x) => { x[klic] = prvek.value; });
 }
 
 /* ---------------------------------------------------------- načtení */
