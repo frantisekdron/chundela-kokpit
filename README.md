@@ -17,6 +17,10 @@ Zakázka je **aktivní** nebo **hotová** a nese čtyři věci:
 
 Obě strany můžou zakázku i video přidat, upravit i smazat.
 
+Nahoře vpravo je **ceník** — sazby za natáčení, fotky, reels, dotáčení
+a příplatky plus dodací podmínky. Řádky se dají klikem upravit, přidat
+i smazat.
+
 ## Jak to funguje
 
 Stránka je statická, ale umí zapisovat: po zadání hesla se v prohlížeči

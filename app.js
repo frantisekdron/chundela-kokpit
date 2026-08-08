@@ -124,6 +124,7 @@ async function odemkni(heslo) {
 
 const SOUBOR_ZAKAZKY = 'data/zakazky.json';
 const SOUBOR_KOMENTARE = 'data/aktivita.json';
+const SOUBOR_CENIK = 'data/cenik.json';
 
 const GH = {
   token: null,
@@ -226,7 +227,7 @@ const GH = {
 /* ---------------------------------------------------------- stav */
 
 const JA = { role: null, jmeno: null };
-const S = { zakazky: [], komentare: [] };
+const S = { zakazky: [], komentare: [], cenik: { polozky: [], podminky: '' } };
 const UI = { filtr: localStorage.getItem('kokpit.filtr') || 'aktivni', hledat: '', otevrena: null, ukladam: 0, hraje: new Set() };
 
 const videno = JSON.parse(localStorage.getItem('kokpit.videno') || '{}');
@@ -278,8 +279,10 @@ async function uloz(zprava, kam, uprav) {
   $('#btn-obnovit').classList.add('tocise');
   try {
     await GH.zmen(kam, uprav, zprava);
-    if (kam === SOUBOR_ZAKAZKY) S.zakazky = GH.mezipamet[kam].data.zakazky.map(normalizuj);
-    else S.komentare = GH.mezipamet[kam].data.polozky;
+    const cerstve = GH.mezipamet[kam].data;
+    if (kam === SOUBOR_ZAKAZKY) S.zakazky = cerstve.zakazky.map(normalizuj);
+    else if (kam === SOUBOR_CENIK) S.cenik = cerstve;
+    else S.komentare = cerstve.polozky;
     vykresli();
     return true;
   } catch (e) {
@@ -420,6 +423,14 @@ function vykresliSuplik() {
   const aktivni = document.activeElement;
   if (suplik.contains(aktivni) && /INPUT|TEXTAREA/.test(aktivni.tagName)) return;
 
+  if (UI.otevrena === CENIK) {
+    const posun = $('.suplik-telo', suplik)?.scrollTop || 0;
+    suplik.innerHTML = htmlCenik();
+    if (posun) $('.suplik-telo', suplik).scrollTop = posun;
+    $$('textarea', suplik).forEach(dorovnej);
+    return;
+  }
+
   const z = najdi(UI.otevrena);
   if (!z) return zavri();
 
@@ -553,6 +564,50 @@ function videoKarta(v) {
     </div>`;
 }
 
+/* ---------------------------------------------------------- ceník */
+
+const CENIK = '#cenik';
+
+/* Čísla dostanou „Kč", texty jako „8 Kč/km" nebo „v ceně" zůstanou, jak jsou. */
+const cenaText = (c) => (/^[+\-]?[\d\s]+$/.test(String(c || '').trim()) ? `${String(c).trim()} Kč` : String(c || ''));
+
+function htmlCenik() {
+  const polozky = S.cenik.polozky || [];
+  const skupiny = [...new Set(polozky.map((p) => p.skupina || 'Ostatní'))];
+
+  return `
+    <div class="suplik-hlava">
+      <div class="sh-radek">
+        <span class="kod">CENÍK</span>
+        <span class="rozpera"></span>
+        <button class="pridat" data-akce="cenik-pridat"><svg class="icon"><use href="#i-plus"/></svg> Přidat položku</button>
+        <button class="ikonbtn" data-akce="zavri" aria-label="Zavřít"><svg class="icon"><use href="#i-krizek"/></svg></button>
+      </div>
+      <h2>Natáčení realit</h2>
+      <p class="cenik-uvod">Kliknutím na řádek se dá cokoliv upravit.</p>
+    </div>
+
+    <div class="suplik-telo">
+      ${skupiny.map((s) => `
+        <div class="blok">
+          <div class="blok-hlava"><h3>${esc(s)}</h3></div>
+          <div class="cenik">
+            ${polozky.filter((p) => (p.skupina || 'Ostatní') === s).map((p) => `
+              <button class="cp" data-akce="cenik-polozka" data-pid="${esc(p.id)}">
+                <span class="cp-nazev">${esc(p.nazev)}${p.poznamka ? `<small>${esc(p.poznamka)}</small>` : ''}</span>
+                <span class="cp-tecky"></span>
+                <span class="cp-cena">${esc(cenaText(p.cena))}</span>
+              </button>`).join('')}
+          </div>
+        </div>`).join('') || '<p class="prazdna-poznamka" style="padding:22px 0">Ceník je zatím prázdný.</p>'}
+
+      <div class="blok" style="padding-bottom:32px">
+        <div class="blok-hlava"><h3>Podmínky</h3></div>
+        <textarea class="vstup" data-cenik-pole="podminky" placeholder="Dodací lhůty, omezení, co je v ceně…">${esc(S.cenik.podminky || '')}</textarea>
+      </div>
+    </div>`;
+}
+
 const zpravaHtml = (k) => `
   <div class="zprava">
     <span class="avatar ${k.role === 'klient' ? 'klient' : ''}">${esc(iniciely(k.kdo))}</span>
@@ -585,6 +640,18 @@ function otevri(id) {
   vykresliSuplik();
   $('.suplik-telo')?.scrollTo(0, 0);
   vykresliPlochu();
+}
+
+function otevriCenik() {
+  if (UI.otevrena !== CENIK) $('#suplik').innerHTML = '';
+  UI.otevrena = CENIK;
+  UI.hraje.clear();
+  $('#suplik').classList.add('otevreno');
+  $('#suplik').setAttribute('aria-hidden', 'false');
+  $('#zaves').classList.add('otevreno');
+  document.body.style.overflow = 'hidden';
+  vykresliSuplik();
+  $('.suplik-telo')?.scrollTo(0, 0);
 }
 
 function zavri() {
@@ -680,6 +747,43 @@ async function akce(jmeno, prvek) {
     if (!v) return;
     return ulozZakazku(`${stitek(z)} — ${popis.toLowerCase()}`, z.id, (x) => { x[d.klic] = v.url; });
   }
+
+  /* ----- ceník ----- */
+
+  if (jmeno === 'cenik') return otevriCenik();
+
+  if (jmeno === 'cenik-pridat' || jmeno === 'cenik-polozka') {
+    const p = jmeno === 'cenik-polozka' ? (S.cenik.polozky || []).find((x) => x.id === d.pid) : null;
+    const skupiny = [...new Set((S.cenik.polozky || []).map((x) => x.skupina).filter(Boolean))];
+    const v = await dialog({
+      titulek: p ? 'Upravit položku' : 'Nová položka ceníku',
+      pole: [
+        { klic: 'skupina', label: 'Skupina', hodnota: p?.skupina || skupiny[0] || '', placeholder: 'Např. Natáčení', napoveda: skupiny.length ? 'Zatím používáme: ' + skupiny.join(', ') : '' },
+        { klic: 'nazev', label: 'Položka', hodnota: p?.nazev || '', placeholder: 'Např. Do 3 hodin natáčení' },
+        { klic: 'cena', label: 'Cena', hodnota: p?.cena || '', placeholder: 'Např. 13 500 nebo 8 Kč/km', napoveda: 'Samotné číslo doplníme o „Kč". Text jako „v ceně" zůstane, jak ho napíšeš.' },
+        { klic: 'poznamka', label: 'Poznámka', typ: 'textarea', hodnota: p?.poznamka || '', placeholder: 'Nepovinné upřesnění' },
+      ],
+      okText: p ? 'Uložit' : 'Přidat',
+      navic: p ? 'Smazat' : null,
+    });
+    if (!v) return;
+
+    if (v.navic) {
+      if (!await potvrd({ titulek: 'Smazat položku?', popis: `„${p.nazev}" zmizí z ceníku.`, okText: 'Smazat' })) return;
+      return uloz(`Ceník — smazáno ${p.nazev}`, SOUBOR_CENIK, (dd) => { dd.polozky = dd.polozky.filter((x) => x.id !== p.id); });
+    }
+    if (!v.nazev) return;
+
+    return p
+      ? uloz(`Ceník — ${v.nazev}`, SOUBOR_CENIK, (dd) => {
+          const cil = (dd.polozky || []).find((x) => x.id === p.id);
+          if (!cil) throw new Error('Tuhle položku už mezitím někdo smazal.');
+          Object.assign(cil, v);
+        })
+      : uloz(`Ceník — přidáno ${v.nazev}`, SOUBOR_CENIK, (dd) => { (dd.polozky = dd.polozky || []).push({ id: uid('c'), ...v }); });
+  }
+
+  /* ----- zakázka ----- */
 
   const z = najdi(UI.otevrena);
   if (!z) return;
@@ -784,14 +888,6 @@ async function akce(jmeno, prvek) {
 }
 
 async function novaZakazka() {
-  /* Návrh navazuje na nejvyšší dosud použité číslo, ne na počet zakázek —
-     jinak by po smazání začal nabízet čísla, která už existují. */
-  const rok = String(new Date().getFullYear()).slice(2);
-  const cislo = 1 + Math.max(0, ...S.zakazky
-    .map((z) => /^(\d{2})-(\d+)$/.exec(z.kod || ''))
-    .filter((m) => m && m[1] === rok)
-    .map((m) => Number(m[2])));
-
   const v = await dialog({
     titulek: 'Nová zakázka',
     pole: [
@@ -799,9 +895,8 @@ async function novaZakazka() {
       { klic: 'podnazev', label: 'Popis', hodnota: '', placeholder: 'Např. Byt 3+kk · 92 m² · Praha 2' },
       { klic: 'nataceno', label: 'Natáčeno', typ: 'date', hodnota: '' },
       {
-        klic: 'kod', label: 'ID zakázky',
-        hodnota: `${rok}-${String(cislo).padStart(2, '0')}`,
-        napoveda: 'Předvyplněné je jen naše pořadové číslo — klidně přepiš vlastním. Jde změnit i později.',
+        klic: 'kod', label: 'ID zakázky', hodnota: '', placeholder: 'Nechat prázdné',
+        napoveda: 'Nemusíš vyplňovat hned — doplnit se dá kdykoliv později v detailu zakázky.',
       },
     ],
     okText: 'Založit',
@@ -839,15 +934,17 @@ async function ulozPole(prvek) {
 /* ---------------------------------------------------------- načtení */
 
 async function nactiVse({ podminene = false } = {}) {
-  const [z, k] = await Promise.all([
+  const [z, k, c] = await Promise.all([
     GH.nacti(SOUBOR_ZAKAZKY, { podminene }),
     GH.nacti(SOUBOR_KOMENTARE, { podminene }),
+    GH.nacti(SOUBOR_CENIK, { podminene }).catch(() => ({ zmeneno: false })),
   ]);
   let zmena = false;
   if (z.zmeneno) { S.zakazky = (z.data.zakazky || []).map(normalizuj); zmena = true; }
   if (k.zmeneno) { S.komentare = k.data.polozky || []; zmena = true; }
+  if (c.zmeneno) { S.cenik = { polozky: c.data.polozky || [], podminky: c.data.podminky || '' }; zmena = true; }
   if (zmena) {
-    localStorage.setItem('kokpit.cache', JSON.stringify({ zakazky: S.zakazky, komentare: S.komentare }));
+    localStorage.setItem('kokpit.cache', JSON.stringify({ zakazky: S.zakazky, komentare: S.komentare, cenik: S.cenik }));
     vykresli();
   }
   return zmena;
@@ -891,7 +988,12 @@ async function spust(token, role, jmeno) {
 
   try {
     const c = JSON.parse(localStorage.getItem('kokpit.cache') || 'null');
-    if (c) { S.zakazky = (c.zakazky || []).map(normalizuj); S.komentare = c.komentare || []; vykresli(); }
+    if (c) {
+      S.zakazky = (c.zakazky || []).map(normalizuj);
+      S.komentare = c.komentare || [];
+      S.cenik = c.cenik || S.cenik;
+      vykresli();
+    }
   } catch {}
 
   try {
@@ -953,7 +1055,15 @@ document.addEventListener('click', (e) => {
   if (e.target.closest('#zaves')) zavri();
 });
 
-document.addEventListener('change', (e) => { if (e.target.matches('[data-pole]')) ulozPole(e.target); });
+document.addEventListener('change', (e) => {
+  if (e.target.matches('[data-pole]')) return ulozPole(e.target);
+  if (e.target.matches('[data-cenik-pole]')) {
+    const klic = e.target.dataset.cenikPole;
+    const nova = e.target.value;
+    if (String(S.cenik[klic] ?? '') === nova) return;
+    uloz('Ceník — podmínky', SOUBOR_CENIK, (dd) => { dd[klic] = nova; });
+  }
+});
 document.addEventListener('input', (e) => { if (e.target.matches('#suplik textarea')) dorovnej(e.target); });
 
 document.addEventListener('keydown', (e) => {
