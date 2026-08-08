@@ -1,4 +1,4 @@
-# Produkční kokpit — Chundela Reality × František Dron
+# Zakázky — Chundela Reality × František Dron
 
 Sdílená nástěnka zakázek. Obě strany vidí to samé a obě můžou psát:
 studio i tým Jana Chundely. Běží zdarma na GitHub Pages, data leží
@@ -6,7 +6,16 @@ v privátním repu `frantisekdron/chundela-data`.
 
 **Živě:** https://frantisekdron.github.io/chundela-kokpit/
 
----
+## Co v tom je
+
+Zakázka je **aktivní** nebo **hotová** a nese čtyři věci:
+
+- odkaz na **fotky** a odkaz na **vizualizace** (plus libovolné další odkazy),
+- **videa** — každé označené 16:9 pro Sreality nebo 9:16 pro reels, přehrají se přímo na stránce,
+- **poznámku**,
+- **komentáře** obou stran.
+
+Obě strany můžou zakázku i video přidat, upravit i smazat.
 
 ## Jak to funguje
 
@@ -14,21 +23,16 @@ Stránka je statická, ale umí zapisovat: po zadání hesla se v prohlížeči
 rozšifruje přístupový klíč ke GitHubu a aplikace pak čte a zapisuje
 `data/zakazky.json` a `data/aktivita.json` v privátním repu.
 
-Z toho plyne pár příjemných věcí:
-
-- **Každá změna je commit.** V repu je vidět kdo, co a kdy změnil, a jde
-  se vrátit k jakékoliv starší verzi.
-- **Nic se nedá nenávratně smazat.** Zakázka jde do koše, odkud se vrací.
-  A i kdyby se smazala natvrdo, je v historii.
+- **Každá změna je commit.** V repu je vidět kdo, co a kdy, a jde se vrátit
+  k jakékoliv starší verzi — i k smazané zakázce.
 - **Dva lidi najednou si nepřepíšou práci.** Když někdo uloží mezitím,
   aplikace si stáhne jeho verzi a naši změnu na ni pustí znovu.
 - **Nulové provozní náklady** a není co udržovat.
 
 Dvě hesla — jedno pro studio, jedno pro Chundelu — otevírají to samé.
-Liší se jen tím, pod jakou stranou se podepisuje, kdo co udělal, a jak
-se počítá „čeká na nás / čeká na vás".
+Liší se jen barvou podpisu u komentářů.
 
-## První nastavení
+## Nastavení přístupu
 
 1. Vyrob přístupový token na GitHubu:
    [github.com/settings/personal-access-tokens/new](https://github.com/settings/personal-access-tokens/new)
@@ -43,9 +47,9 @@ se počítá „čeká na nás / čeká na vás".
    python3 nastav_pristup.py
    ```
 
-3. Pošli Honzovi odkaz a jeho heslo. Hotovo.
+Když token vyprší nebo ho někdo zruší, spusť to znovu. Hesla můžou zůstat stejná.
 
-## Úpravy kokpitu
+## Úpravy
 
 Uprav `index.html`, `styles.css` nebo `app.js` a nasaď:
 
@@ -55,21 +59,12 @@ Uprav `index.html`, `styles.css` nebo `app.js` a nasaď:
 
 Data se tím netýkají — ta jsou v druhém repu a mění se přímo z aplikace.
 
-## Výměna tokenu
-
-Když token vyprší nebo ho někdo zruší, znovu spusť `nastav_pristup.py`.
-Hesla můžou zůstat stejná, nebo je při té příležitosti změň — všem
-najednou.
-
-## Kde co je
-
 | Soubor | K čemu |
 |---|---|
 | `index.html` | kostra stránky a ikony |
 | `styles.css` | vizuální systém (zlatá a antracit ze značky Chundela Reality) |
 | `app.js` | šifrování, vrstva nad GitHub API, vykreslování, akce |
 | `config.js` | zašifrované přístupové klíče — generuje `nastav_pristup.py` |
-| `seed/` | výchozí data, kterými se naplnil privátní repo (necommituje se) |
 
 ---
 
@@ -80,16 +75,14 @@ najednou.
 Otevři **https://frantisekdron.github.io/chundela-kokpit/**, zadej heslo
 a přidej si stránku na plochu telefonu. Heslo si prohlížeč pamatuje.
 
-Nahoře je **volací list** — dva sloupce, co čeká na nás a co na vás.
-Kliknutím na řádek se otevře konkrétní zakázka.
+Nahoře přepínáš mezi **aktivními** a **hotovými** zakázkami. U každé jsou
+rovnou na dlaždici tlačítka **Fotky** a **Vizualizace** — otevřou se jedním
+klikem, nemusíš nikam chodit.
 
-U každé zakázky najdeš odkaz na fotky, na vizualizace, na inzerát
-a všechna videa. Videa se přehrají rovnou v kokpitu, ve stejném tvaru,
-v jakém pak půjdou ven: na šířku pro Sreality, na výšku pro reels.
+Klikem na zakázku se otevře detail: všechna videa se přehrají přímo tam,
+ve tvaru, v jakém půjdou ven — na šířku pro Sreality, na výšku pro reels.
+Pod nimi je místo na komentáře. Když má být na videu něco jinak, napiš čas
+a co s ním, třeba „0:14 ubrat hudbu".
 
-Když je video hotové, objeví se u něj **Schválit** a **Chci úpravy**.
-U úprav napiš čas ve videu a co s ním — třeba „0:14 ubrat hudbu".
-Připomínka nám hned naskočí do volacího listu.
-
-Cokoliv dalšího napiš do komentářů dole u zakázky. Zakázku můžete
-i sami založit, přidat úkol nebo doplnit odkaz.
+Zakázku, video i odkaz můžeš sám přidat, přepsat nebo smazat. Nic se
+nemůže nenávratně ztratit — všechno je v historii.
