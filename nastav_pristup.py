@@ -2,12 +2,14 @@
 """
 Nastavení přístupu do kokpitu.
 
-Zeptá se na přístupový token z GitHubu a na dvě hesla — jedno pro naše
-studio, druhé pro tým Chundela Reality. Token zašifruje oběma hesly
-a výsledek zapíše do config.js. Token se nikam jinam neukládá a bez
-hesla se z config.js nedá přečíst.
+Zeptá se na přístupový klíč z GitHubu, OVĚŘÍ ho (jestli vidí repozitář
+a jestli do něj umí zapisovat) a teprve pak ho zašifruje dvěma hesly
+do config.js. Klíč se nikam jinam neukládá a bez hesla se z config.js
+nedá přečíst.
 
-Spuštění:  python3 nastav_pristup.py
+Spuštění:
+    python3 nastav_pristup.py            nastavit přístup
+    python3 nastav_pristup.py --overit   jen otestovat klíč, nic nezapisovat
 """
 
 import base64
@@ -17,6 +19,8 @@ import json
 import os
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 try:
@@ -27,15 +31,86 @@ except ImportError:
 ITERACE = 600_000
 KOREN = Path(__file__).resolve().parent
 CONFIG = KOREN / "config.js"
+ZKUSEBNI_SOUBOR = "data/.overeni-pristupu"
 
+
+# ---------------------------------------------------------------- GitHub
+
+def gh(cesta: str, klic: str, metoda: str = "GET", telo=None):
+    """Zavolá GitHub API a vrátí (stavový kód, tělo jako dict)."""
+    req = urllib.request.Request("https://api.github.com" + cesta, method=metoda)
+    req.add_header("Authorization", "Bearer " + klic)
+    req.add_header("Accept", "application/vnd.github+json")
+    req.add_header("X-GitHub-Api-Version", "2022-11-28")
+    data = None
+    if telo is not None:
+        data = json.dumps(telo).encode("utf-8")
+        req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, data, timeout=25) as r:
+            return r.status, json.loads(r.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        try:
+            return e.code, json.loads(e.read() or b"{}")
+        except Exception:
+            return e.code, {}
+    except urllib.error.URLError as e:
+        return 0, {"message": f"nedá se spojit s GitHubem ({e.reason})"}
+
+
+def overit_klic(klic: str, owner: str, repo: str):
+    """Vrátí None když je klíč v pořádku, jinak text co je špatně."""
+    print("  Ověřuji klíč…", end="", flush=True)
+
+    stav, telo = gh(f"/repos/{owner}/{repo}", klic)
+    if stav == 0:
+        return telo.get("message", "GitHub neodpovídá.")
+    if stav == 401:
+        return ("Klíč je neplatný nebo vypršel.\n"
+                "     Vyrob nový na github.com/settings/personal-access-tokens")
+    if stav == 404:
+        return (f"Klíč nevidí repozitář {owner}/{repo}.\n"
+                "     Nejčastější příčina: v klíči je špatně vyplněné jedno ze dvou polí.\n"
+                f"       Resource owner ...... musí být {owner} (ne organizace)\n"
+                f"       Repository access ... Only select repositories → {owner}/{repo}\n"
+                "     Pozor: volba „Public repositories\" na tenhle repozitář nestačí,\n"
+                "     protože je soukromý.")
+    if stav != 200:
+        return f"GitHub vrátil {stav}: {telo.get('message', '')}"
+
+    prava = telo.get("permissions") or {}
+    if not prava.get("push"):
+        return ("Klíč umí data jen číst, ne zapisovat.\n"
+                "     V nastavení klíče přepni Repository permissions → Contents\n"
+                "     na „Read and write\".")
+
+    # Skutečná zkouška zápisu — ať se to nezjistí až v prohlížeči.
+    stav, telo = gh(
+        f"/repos/{owner}/{repo}/contents/{ZKUSEBNI_SOUBOR}", klic, "PUT",
+        {"message": "Ověření přístupu", "content": base64.b64encode(b"ok").decode()},
+    )
+    if stav not in (200, 201):
+        return ("Klíč sice repozitář vidí, ale zápis neprošel.\n"
+                f"     GitHub vrátil {stav}: {telo.get('message', '')}\n"
+                "     Zkontroluj Repository permissions → Contents = „Read and write\".")
+
+    sha = (telo.get("content") or {}).get("sha")
+    if sha:
+        gh(f"/repos/{owner}/{repo}/contents/{ZKUSEBNI_SOUBOR}", klic, "DELETE",
+           {"message": "Úklid po ověření", "sha": sha})
+
+    print(" v pořádku, čte i zapisuje.")
+    return None
+
+
+# ---------------------------------------------------------------- šifrování
 
 def zasifruj(text: str, heslo: str) -> str:
     """sůl(16) + iv(12) + šifra — přesně jak to čte prohlížeč ve WebCrypto."""
     sul = os.urandom(16)
     iv = os.urandom(12)
     klic = hashlib.pbkdf2_hmac("sha256", heslo.encode("utf-8"), sul, ITERACE, 32)
-    sifra = AESGCM(klic).encrypt(iv, text.encode("utf-8"), None)
-    return base64.b64encode(sul + iv + sifra).decode("ascii")
+    return base64.b64encode(sul + iv + AESGCM(klic).encrypt(iv, text.encode("utf-8"), None)).decode("ascii")
 
 
 def nacti_nastaveni() -> dict:
@@ -44,41 +119,70 @@ def nacti_nastaveni() -> dict:
     return json.loads(text[text.index("{"): text.rindex("}") + 1])
 
 
+# ---------------------------------------------------------------- dialog
+
+NAVOD = """
+  Klíč vyrobíš tady:
+
+    github.com/settings/personal-access-tokens/new
+
+    Token name .......... kokpit-chundela
+    Resource owner ...... {owner}
+    Expiration .......... No expiration  (nebo rok, pak se obnovuje)
+    Repository access ... Only select repositories → {owner}/{repo}
+    Permissions ......... Repository permissions → Contents → Read and write
+
+  Pak Generate token a klíč zkopíruj (začíná github_pat_).
+"""
+
+
+def ziskej_klic(owner: str, repo: str) -> str:
+    print(NAVOD.format(owner=owner, repo=repo))
+    while True:
+        klic = getpass.getpass("  Vlož klíč (nebude vidět): ").strip()
+        if not klic:
+            sys.exit("  Zrušeno.")
+        if not klic.startswith(("github_pat_", "ghp_")):
+            print("  To nevypadá jako klíč z GitHubu. Má začínat github_pat_ nebo ghp_.\n")
+            continue
+        potize = overit_klic(klic, owner, repo)
+        if not potize:
+            return klic
+        print(f"\n  ✗ {potize}\n")
+        if input("  Opravit v prohlížeči a zkusit znovu? [a/n] ").strip().lower() not in ("a", "ano", "y", ""):
+            sys.exit("  Nastavení zrušeno, config.js zůstal beze změny.")
+        print()
+
+
 def zeptej_se_na_heslo(pro_koho: str) -> str:
     while True:
-        a = getpass.getpass(f"Heslo pro {pro_koho}: ")
+        a = getpass.getpass(f"  Heslo pro {pro_koho}: ")
         if len(a) < 10:
-            print("   Aspoň 10 znaků, prosím. Tímhle heslem je chráněný přístup k datům.")
+            print("     Aspoň 10 znaků, prosím. Tímhle heslem je chráněný přístup k datům.")
             continue
-        b = getpass.getpass("   Ještě jednou pro kontrolu: ")
+        b = getpass.getpass("     Ještě jednou pro kontrolu: ")
         if a != b:
-            print("   Hesla se neshodují, zkus to znovu.")
+            print("     Hesla se neshodují, zkus to znovu.")
             continue
         return a
 
 
 def main() -> None:
+    nastaveni = nacti_nastaveni()
+    owner, repo = nastaveni["owner"], nastaveni["repo"]
+    jen_overit = "--overit" in sys.argv
+
     print("\n  NASTAVENÍ PŘÍSTUPU DO KOKPITU")
     print("  " + "-" * 46)
-    print("""
-  Potřebuješ přístupový token z GitHubu. Vyrobíš ho tady:
 
-    github.com/settings/personal-access-tokens/new
+    klic = ziskej_klic(owner, repo)
 
-    Token name .... kokpit-chundela
-    Expiration .... No expiration  (nebo 1 rok, pak se obnovuje)
-    Repository access ... Only select repositories → frantisekdron/chundela-data
-    Permissions → Repository permissions → Contents → Read and write
-
-  Pak klikni Generate token a zkopíruj ho (začíná github_pat_).
-""")
-
-    token = getpass.getpass("  Vlož token (nebude vidět): ").strip()
-    if not token.startswith(("github_pat_", "ghp_")):
-        sys.exit("  To nevypadá jako GitHub token. Má začínat github_pat_ nebo ghp_.")
+    if jen_overit:
+        print("\n  Klíč je funkční. Nic jsem nezapisoval.\n")
+        return
 
     print("\n  Teď dvě hesla. Každá strana dostane to svoje.")
-    print("  (Obě otevírají to samé — liší se jen podpisem u změn.)\n")
+    print("  (Obě otevírají to samé — liší se jen podpisem u komentářů.)\n")
     heslo_studio = zeptej_se_na_heslo("naše studio")
     heslo_klient = zeptej_se_na_heslo("tým Chundela Reality")
 
@@ -86,11 +190,10 @@ def main() -> None:
         sys.exit("  Hesla musí být různá, jinak nepoznáme, kdo je kdo.")
 
     print("\n  Šifruji (chvilku to trvá, je to schválně pomalé)…")
-    nastaveni = nacti_nastaveni()
     nastaveni["iterace"] = ITERACE
     nastaveni["blobs"] = {
-        "studio": zasifruj(token, heslo_studio),
-        "klient": zasifruj(token, heslo_klient),
+        "studio": zasifruj(klic, heslo_studio),
+        "klient": zasifruj(klic, heslo_klient),
     }
 
     CONFIG.write_text(
@@ -103,7 +206,7 @@ def main() -> None:
     print(f"  Hotovo, zapsáno do {CONFIG.name}.")
 
     if input("\n  Nasadit rovnou na web? [a/n] ").strip().lower() in ("a", "ano", "y", ""):
-        subprocess.run(["bash", str(KOREN / "nasadit.sh")], check=False)
+        subprocess.run(["bash", str(KOREN / "nasadit.sh"), "Nový přístupový klíč"], check=False)
     else:
         print("  Až budeš chtít, spusť:  ./nasadit.sh")
 
