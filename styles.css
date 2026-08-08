@@ -136,6 +136,17 @@ main { width: var(--w); margin: 0 auto; padding-bottom: 90px; }
 .zalozka[aria-selected="true"] { background: var(--gold-ghost); color: var(--gold); }
 .zalozka b { font-family: var(--font-mono); font-weight: 400; font-size: 11px; margin-left: 6px; opacity: 0.65; }
 
+/* Ceník stojí v jedné řadě se zakázkami, ale není to filtr — proto rámeček. */
+.zalozka-cenik {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 16px; border: 1px solid var(--line); border-radius: 100px;
+  font-size: 14px; font-weight: 500; color: var(--muted);
+  transition: border-color 0.15s var(--ease), color 0.15s var(--ease), background 0.15s var(--ease);
+}
+.zalozka-cenik:hover { border-color: var(--gold-dim); color: var(--gold); background: var(--gold-ghost); }
+.zalozka-cenik .icon { font-size: 15px; color: var(--gold-dim); }
+.zalozka-cenik:hover .icon { color: var(--gold); }
+
 .btn-nova {
   display: flex; align-items: center; gap: 7px; margin-left: auto;
   padding: 8px 15px; border-radius: var(--r); background: var(--gold); color: var(--ink);
@@ -261,12 +272,16 @@ main { width: var(--w); margin: 0 auto; padding-bottom: 90px; }
 .sh-radek .rozpera { flex: 1; }
 .suplik-hlava h2 { font-size: 21px; line-height: 1.2; }
 
-/* Dvě třídy schválně — musí to přebít width:100 % z .vstup, které je v souboru níž. */
+/* Dvě třídy schválně — musí to přebít width:100 % z .vstup, které je v souboru níž.
+   Rámeček je vidět pořád, aby bylo poznat, že se do ID dá psát. */
 .suplik-hlava .kod-vstup {
-  flex: 0 1 auto; width: 160px; min-width: 0;
-  font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.06em; color: var(--gold-dim);
-  padding: 5px 7px; margin: -5px -7px;
+  flex: 0 1 auto; width: 170px; min-width: 0;
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.06em; color: var(--gold);
+  padding: 6px 9px; margin: 0;
+  border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--ink);
 }
+.suplik-hlava .kod-vstup:hover { border-color: var(--line-hi); }
+.suplik-hlava .kod-vstup:focus { border-color: var(--gold-dim); background: var(--ink); }
 .suplik-hlava .kod-vstup::placeholder { color: var(--muted-2); font-style: normal; }
 
 .sh-datum { display: flex; align-items: center; gap: 12px; margin-top: 10px; }

@@ -68,7 +68,6 @@
         <input type="search" id="hledat" placeholder="Hledat zakázku…" aria-label="Hledat zakázku">
       </div>
       <div class="top-akce">
-        <button class="ikonbtn" data-akce="cenik" title="Ceník" aria-label="Ceník"><svg class="icon"><use href="#i-cenik"/></svg></button>
         <button class="ikonbtn" id="btn-obnovit" title="Načíst znovu" aria-label="Načíst znovu"><svg class="icon"><use href="#i-obnovit"/></svg></button>
         <button class="ikonbtn" id="btn-role" title="Změnit podpis"><span class="avatar" id="me-avatar">FD</span></button>
       </div>
@@ -81,6 +80,7 @@
         <button class="zalozka" role="tab" data-filtr="aktivni" aria-selected="true">Aktivní <b id="p-aktivni">0</b></button>
         <button class="zalozka" role="tab" data-filtr="hotove" aria-selected="false">Hotové <b id="p-hotove">0</b></button>
       </div>
+      <button class="zalozka-cenik" data-akce="cenik"><svg class="icon"><use href="#i-cenik"/></svg> Ceník</button>
       <button class="btn-nova" id="btn-nova"><svg class="icon"><use href="#i-plus"/></svg> Nová zakázka</button>
     </nav>
     <section id="plocha"></section>

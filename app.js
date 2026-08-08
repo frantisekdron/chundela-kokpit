@@ -928,7 +928,9 @@ async function ulozPole(prvek) {
   const klic = prvek.dataset.pole;
   if (String(z[klic] ?? '') === prvek.value) return;
   const nazvy = { nazev: 'název', podnazev: 'popis', poznamka: 'poznámku', kod: 'ID zakázky', nataceno: 'datum natáčení' };
-  await ulozZakazku(`${stitek(z)} — ${nazvy[klic] || klic}`, z.id, (x) => { x[klic] = prvek.value; });
+  if (await ulozZakazku(`${stitek(z)} — ${nazvy[klic] || klic}`, z.id, (x) => { x[klic] = prvek.value; })) {
+    hlaska('Uloženo.', 'uspech');
+  }
 }
 
 /* ---------------------------------------------------------- načtení */
@@ -1074,7 +1076,15 @@ document.addEventListener('keydown', (e) => {
     e.stopPropagation();
     return akce(e.target.dataset.akce, e.target);
   }
-  if (e.key === 'Escape' && UI.otevrena && !$('#dlg').open) zavri();
+  /* Enter v políčku ho potvrdí — bez toho by to vypadalo, že se nic neuložilo. */
+  if (e.key === 'Enter' && e.target.matches?.('input[data-pole], input[data-cenik-pole]')) {
+    e.preventDefault();
+    return e.target.blur();
+  }
+  if (e.key === 'Escape' && UI.otevrena && !$('#dlg').open) {
+    if (document.activeElement?.matches?.('[data-pole], [data-cenik-pole]')) document.activeElement.blur();
+    zavri();
+  }
   if (e.key === '/' && document.activeElement === document.body) { e.preventDefault(); $('#hledat').focus(); }
   if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && e.target.id === 'novy-komentar') akce('komentar', e.target);
 });
