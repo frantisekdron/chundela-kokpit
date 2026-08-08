@@ -96,6 +96,11 @@ async function desifruj(blobB64, heslo) {
   return new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: raw.slice(16, 28) }, klic, raw.slice(28)));
 }
 
+/* Otisk klíčů z config.js. Když se klíč vymění, uložené přihlášení
+   v prohlížeči přestane platit a kokpit si řekne o heslo znovu —
+   jinak by lidem donekonečna zůstal viset ten starý, už neplatný. */
+const otiskKlicu = () => Object.values(CFG.blobs || {}).map((b) => String(b || '').slice(-32)).join('|');
+
 async function odemkni(heslo) {
   for (const [role, blob] of Object.entries(CFG.blobs || {})) {
     if (!blob) continue;
@@ -576,7 +581,7 @@ function dialogPole(p) {
   return `<div class="dlg-pole"><label for="${id}">${esc(p.label)}</label>${vstup}${p.napoveda ? `<span class="napoveda">${esc(p.napoveda)}</span>` : ''}</div>`;
 }
 
-function dialog({ titulek, popis, pole = [], okText = 'Uložit', nebezpeci = false }) {
+function dialog({ titulek, popis, pole = [], okText = 'Uložit', nebezpeci = false, navic = null }) {
   const dlg = $('#dlg');
   $('#dlg-titulek').textContent = titulek;
   $('#dlg-popis').textContent = popis || '';
@@ -584,6 +589,8 @@ function dialog({ titulek, popis, pole = [], okText = 'Uložit', nebezpeci = fal
   $('#dlg-telo').innerHTML = pole.map(dialogPole).join('');
   $('#dlg-ok').textContent = okText;
   $('#dlg-ok').classList.toggle('nebezpeci', nebezpeci);
+  $('#dlg-extra').textContent = navic || '';
+  $('#dlg-extra').classList.toggle('skryto', !navic);
 
   $$('[data-prepinac]', dlg).forEach((skup) => skup.addEventListener('click', (e) => {
     const b = e.target.closest('button[data-hodnota]');
@@ -599,6 +606,7 @@ function dialog({ titulek, popis, pole = [], okText = 'Uložit', nebezpeci = fal
     const uklid = () => {
       $('#dlg-form').removeEventListener('submit', odeslat);
       $('#dlg-zrusit').removeEventListener('click', zrusit);
+      $('#dlg-extra').removeEventListener('click', navicKlik);
       dlg.removeEventListener('cancel', zavreno);
     };
     function odeslat(e) {
@@ -608,9 +616,11 @@ function dialog({ titulek, popis, pole = [], okText = 'Uložit', nebezpeci = fal
       uklid(); dlg.close(); hotovo(out);
     }
     function zrusit() { uklid(); dlg.close(); hotovo(null); }
+    function navicKlik() { uklid(); dlg.close(); hotovo({ navic: true }); }
     function zavreno() { uklid(); hotovo(null); }
     $('#dlg-form').addEventListener('submit', odeslat);
     $('#dlg-zrusit').addEventListener('click', zrusit);
+    $('#dlg-extra').addEventListener('click', navicKlik);
     dlg.addEventListener('cancel', zavreno);
   });
 }
@@ -883,7 +893,7 @@ $('#zamek-form').addEventListener('submit', async (e) => {
       jmeno = v.jmeno.trim().slice(0, 40);
       localStorage.setItem('kokpit.jmeno', jmeno);
     }
-    localStorage.setItem('kokpit.sez', JSON.stringify({ token: vysledek.token, role: vysledek.role }));
+    localStorage.setItem('kokpit.sez', JSON.stringify({ token: vysledek.token, role: vysledek.role, otisk: otiskKlicu() }));
     await spust(vysledek.token, vysledek.role, jmeno);
   } catch (err) {
     $('#zamek-chyba').textContent = 'Něco se pokazilo: ' + err.message;
@@ -934,7 +944,9 @@ $('#btn-role').addEventListener('click', async () => {
     popis: `Jsi přihlášený za ${JA.role === 'klient' ? 'Chundela Reality' : 'studio'}. Pod tímhle jménem se podepisují komentáře.`,
     pole: [{ klic: 'jmeno', label: 'Jméno', hodnota: JA.jmeno }],
     okText: 'Uložit',
+    navic: 'Odhlásit',
   });
+  if (v?.navic) return odhlas();
   if (!v?.jmeno) return;
   JA.jmeno = v.jmeno.trim();
   localStorage.setItem('kokpit.jmeno', JA.jmeno);
@@ -953,6 +965,12 @@ $('#btn-role').addEventListener('click', async () => {
   try {
     const sez = JSON.parse(localStorage.getItem('kokpit.sez') || 'null');
     const jmeno = localStorage.getItem('kokpit.jmeno');
-    if (sez?.token && jmeno) await spust(sez.token, sez.role, jmeno);
+    if (!sez?.token || !jmeno) return;
+    if (sez.otisk !== otiskKlicu()) {
+      localStorage.removeItem('kokpit.sez');
+      $('#zamek-chyba').textContent = 'Přístupový klíč se změnil. Přihlas se prosím znovu.';
+      return;
+    }
+    await spust(sez.token, sez.role, jmeno);
   } catch {}
 })();
