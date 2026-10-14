@@ -28,6 +28,8 @@ můžou cokoliv přidat, upravit i smazat.
 Půdorysy a bannery (obrázky i PDF) se nahrávají přímo do privátního repa
 do složky `soubory/`, takže nikde nevisí veřejně — kokpit si je stahuje
 přístupovým klíčem a ukazuje jako náhledy. Na soubor platí limit 10 MB.
+Tlačítkem **Stáhnout vše** v hlavičce panelu se stáhnou všechny najednou
+v jednom ZIPu (na iPhonu s kokpitem na ploše přes Sdílet → Uložit do Souborů).
 
 V řadě se záložkami Aktivní / Hotové je **ceník** — sazby za natáčení,
 fotky, reels, dotáčení a příplatky plus dodací podmínky. Řádky se dají
@@ -97,6 +99,7 @@ Data se tím netýkají — ta jsou v druhém repu a mění se přímo z aplikac
 | `app.js` | šifrování, vrstva nad GitHub API, vykreslování, akce |
 | `config.js` | zašifrované přístupové klíče — generuje `nastav_pristup.py` |
 | `vendor/morphdom.min.js` | knihovna, která při překreslení mění jen to, co se liší (kurzor, rozepsaný text i hrající video zůstanou) — MIT, licence vedle |
+| `vendor/fflate.min.js` | balení ZIPu pro „Stáhnout vše" přímo v prohlížeči, načte se až po kliknutí — MIT, licence vedle |
 | `tools/notifikace/notifikace.gs` | e-mailový souhrn změn (Google Apps Script), postup nasazení v hlavičce |
 
 ---
