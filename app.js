@@ -360,15 +360,83 @@ const souborNaB64 = (soubor) => new Promise((hotovo, chyba) => {
 
 const pripona = (jmeno) => (jmeno.match(/\.([a-zA-Z0-9]{1,8})$/)?.[1] || 'bin').toLowerCase();
 
-/* Stáhne soubor z repa a vrátí adresu, kterou umí otevřít prohlížeč. */
+/* Stáhne soubor z repa (jednou — pak se bere z paměti). */
+const souborBloby = new Map();
+async function souborBlob(cesta) {
+  if (!souborBloby.has(cesta)) {
+    souborBloby.set(cesta, (async () => {
+      const r = await GH.volej(`${GH.cesta(cesta)}?ref=${CFG.branch}`, { headers: { Accept: 'application/vnd.github.raw' } });
+      if (!r.ok) throw await GH.selhalo(r);
+      return r.blob();
+    })().catch((e) => { souborBloby.delete(cesta); throw e; }));
+  }
+  return souborBloby.get(cesta);
+}
+
+/* Adresa souboru, kterou umí otevřít prohlížeč. */
 async function souborUrl(cesta) {
   if (blobUrl.has(cesta)) return blobUrl.get(cesta);
-  const r = await GH.volej(`${GH.cesta(cesta)}?ref=${CFG.branch}`, { headers: { Accept: 'application/vnd.github.raw' } });
-  if (!r.ok) throw await GH.selhalo(r);
-  const url = URL.createObjectURL(await r.blob());
+  const url = URL.createObjectURL(await souborBlob(cesta));
   blobUrl.set(cesta, url);
   return url;
 }
+
+/* Knihovna, která je potřeba jen výjimečně, se načte až ve chvíli potřeby. */
+const nacteneKnihovny = new Map();
+function nactiKnihovnu(src, jmeno) {
+  if (window[jmeno]) return Promise.resolve(window[jmeno]);
+  if (!nacteneKnihovny.has(src)) {
+    nacteneKnihovny.set(src, new Promise((hotovo, chyba) => {
+      const sk = document.createElement('script');
+      sk.src = src;
+      sk.onload = () => hotovo(window[jmeno]);
+      sk.onerror = () => { nacteneKnihovny.delete(src); chyba(new Error('Nepodařilo se načíst pomocnou knihovnu.')); };
+      document.head.append(sk);
+    }));
+  }
+  return nacteneKnihovny.get(src);
+}
+
+/* Kokpit spuštěný z plochy iPhonu (bez Safari kolem). Tam stahování přes
+   <a download> uvězní člověka na obrazovce bez cesty zpět — známá chyba iOS. */
+const jeAplikaceNaIphonu = () =>
+  (/iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1))
+  && (navigator.standalone === true || matchMedia('(display-mode: standalone)').matches);
+
+/* Uloží soubor do počítače (u mobilu do Stažených). Vrací true, když se uložil
+   nebo začal stahovat; false, když ho člověk v nabídce Sdílet zavřel. */
+async function ulozDoPocitace(blob, nazev) {
+  const soubor = new File([blob], nazev, { type: blob.type });
+  if (jeAplikaceNaIphonu() && navigator.canShare?.({ files: [soubor] })) {
+    /* Sdílení musí vyvolat klepnutí — proto napřed dialog s tlačítkem. */
+    const v = await dialog({
+      titulek: 'ZIP je připravený',
+      popis: 'Klepni na Uložit a v nabídce vyber „Uložit do Souborů“.',
+      pole: [], okText: 'Uložit',
+    });
+    if (!v) return false;
+    try {
+      await navigator.share({ files: [soubor] });
+      return true;
+    } catch (e) {
+      if (e.name === 'AbortError') return false;
+      throw e;
+    }
+  }
+  const url = URL.createObjectURL(soubor);
+  const a = Object.assign(document.createElement('a'), { href: url, download: nazev });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5 * 60000);
+  return true;
+}
+
+/* Které ZIPy se právě připravují (zakázka:sekce) — pojistka proti dvojkliku. */
+const zipuje = new Set();
+
+/* Název souboru bez znaků, které systémy v názvu nesnesou. */
+const bezpecnyNazev = (t) => String(t).replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '-').replace(/\s+/g, ' ').trim().slice(0, 120) || 'soubor';
 
 /* Když mezitím uložil někdo jiný, GitHub občas vrátí konflikt (409), i když
    jde o jiný soubor — posunula se větev. Pár pokusů s pauzou to vyřeší. */
@@ -728,12 +796,11 @@ function dorovnej(pole) {
 /* Jeden rámeček pro každou sekci detailu — ať se obsah neslévá. */
 const panel = ({ ikona, titulek, pocet = null, akce = '', obsah }) => `
   <section class="panel">
-    <header class="panel-hlava">
+    <header class="panel-hlava${akce ? ' s-akcemi' : ''}">
       <svg class="icon"><use href="#${ikona}"/></svg>
       <h3>${esc(titulek)}</h3>
       ${pocet !== null ? `<span class="panel-pocet">${pocet}</span>` : ''}
-      <span class="rozpera"></span>
-      ${akce}
+      ${akce ? `<span class="panel-akce">${akce}</span>` : ''}
     </header>
     <div class="panel-telo">${obsah}</div>
   </section>`;
@@ -881,7 +948,8 @@ function panelSouboru(z, sekce) {
 
   return panel({
     ikona, titulek: popis, pocet: vse.length,
-    akce: `<button class="pridat" data-akce="nahrat" data-sekce="${sekce}"><svg class="icon"><use href="#i-nahrat"/></svg> Nahrát</button>`,
+    akce: `${vse.length ? `<button class="pridat" data-akce="stahnout-vse" data-sekce="${sekce}" title="Stáhnout všechny ${esc(popis.toLowerCase())} v jednom ZIPu"><svg class="icon"><use href="#i-stahnout"/></svg> Stáhnout vše</button>` : ''}
+      <button class="pridat" data-akce="nahrat" data-sekce="${sekce}"><svg class="icon"><use href="#i-nahrat"/></svg> Nahrát</button>`,
     obsah: vse.length ? `
       <div class="soubory">${ukazat.map((f) => dlazdiceSouboru(z, f, sekce)).join('')}</div>
       ${zbyva > 0 ? `<button class="rozbalit" data-akce="rozbalit" data-sekce="${sekce}">Zobrazit další (${zbyva})</button>` : ''}
@@ -1412,6 +1480,50 @@ async function akce(jmeno, prvek) {
     return;
   }
 
+  /* Všechny soubory sekce v jednom ZIPu. Soubory jsou v soukromém repu,
+     takže je kokpit stáhne klíčem a zabalí přímo v prohlížeči. */
+  if (jmeno === 'stahnout-vse') {
+    const sekce = d.sekce;
+    const soubory = [...(z[sekce] || [])];
+    const klicZipu = z.id + ':' + sekce;
+    if (!soubory.length || zipuje.has(klicZipu)) return;  /* dvojklik = jeden ZIP */
+    zipuje.add(klicZipu);
+    const prubeh = hlaskaPrubeh('Připravuji ZIP…');
+    try {
+      const fflate = await nactiKnihovnu('vendor/fflate.min.js', 'fflate');
+      const obsah = {};
+      const pouzita = new Set();
+      let chybi = 0;
+      for (const [i, f] of soubory.entries()) {
+        prubeh.text(`Stahuji ${i + 1} z ${soubory.length} — ${f.nazev}`);
+        try {
+          const data = new Uint8Array(await (await souborBlob(f.cesta)).arrayBuffer());
+          /* Stejné názvy dostanou číslo, jinak by se v ZIPu přepsaly. */
+          let jmeno = bezpecnyNazev(f.nazev);
+          for (let n = 2; pouzita.has(jmeno.toLowerCase()); n++) jmeno = bezpecnyNazev(f.nazev).replace(/(\.[^.]*)?$/, ` (${n})$1`);
+          pouzita.add(jmeno.toLowerCase());
+          obsah[jmeno] = [data, { level: 0 }];  // obrázky a PDF jsou už zkomprimované
+        } catch {
+          chybi++;
+        }
+      }
+      if (!Object.keys(obsah).length) throw new Error('Žádný soubor se nepodařilo stáhnout.');
+      prubeh.text('Balím…');
+      const zip = fflate.zipSync(obsah);
+      prubeh.pryc();
+      const ulozeno = await ulozDoPocitace(new Blob([zip], { type: 'application/zip' }), `${bezpecnyNazev(z.nazev)} – ${SEKCE[sekce].popis.toLowerCase()}.zip`);
+      if (ulozeno) {
+        hlaska(chybi ? `ZIP je stažený, ale ${chybi} ${chybi === 1 ? 'soubor' : 'souborů'} se nepodařilo přidat.` : 'ZIP je stažený.', chybi ? 'chyba' : 'uspech');
+      }
+    } catch (e) {
+      hlaska(e.message || 'ZIP se nepodařilo připravit.', 'chyba');
+    } finally {
+      prubeh.pryc();
+      zipuje.delete(klicZipu);
+    }
+    return;
+  }
+
   if (jmeno === 'smazat-soubor') {
     const sekce = d.sekce;
     const f = (z[sekce] || []).find((x) => x.id === d.sid);
@@ -1423,6 +1535,7 @@ async function akce(jmeno, prvek) {
     })) return;
     const url = blobUrl.get(f.cesta);
     if (url) { URL.revokeObjectURL(url); blobUrl.delete(f.cesta); }
+    souborBloby.delete(f.cesta);
     try { await sOpakovanim(() => smazZRepa(f.cesta, `Smazán soubor ${f.nazev}`)); } catch { /* záznam je pryč, zbytek nevadí */ }
     return;
   }

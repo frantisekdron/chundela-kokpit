@@ -795,3 +795,9 @@ button.stitek:hover { background: rgba(210, 186, 138, 0.24); border-color: var(-
 }
 .prednost-novy input:focus { border-color: var(--gold-dim); outline: none; }
 .prednost-novy input::placeholder { color: var(--muted-2); }
+
+/* Akce v hlavičce panelu: nikdy se nezalomí uprostřed, a když se vedle
+   nadpisu nevejdou (dvě tlačítka na úzkém mobilu), přejdou na další řádek vpravo. */
+.panel-hlava.s-akcemi { flex-wrap: wrap; row-gap: 2px; }
+.panel-akce { display: flex; align-items: center; gap: 2px; margin-left: auto; }
+.pridat { white-space: nowrap; }
