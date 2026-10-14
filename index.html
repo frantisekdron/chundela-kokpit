@@ -15,6 +15,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@700;800&family=Instrument+Sans:wght@400;500;600&family=Space+Mono:wght@400&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
 <link rel="stylesheet" href="znacka.css">
+<link rel="stylesheet" href="vlastni.css">
 </head>
 <body>
 
@@ -44,6 +45,7 @@
   <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.3"/></symbol>
   <symbol id="i-hvezda" viewBox="0 0 24 24"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"/></symbol>
   <symbol id="i-stahnout" viewBox="0 0 24 24"><path d="M12 4.5V16"/><path d="M7.5 11.5L12 16l4.5-4.5"/><path d="M4 15v3.5a1.5 1.5 0 0 0 1.5 1.5h13a1.5 1.5 0 0 0 1.5-1.5V15"/></symbol>
+  <symbol id="i-graf" viewBox="0 0 24 24"><path d="M3.5 20.5h17"/><path d="M6.5 16.5v-5M11 16.5V7M15.5 16.5v-7M20 16.5V4.5"/></symbol>
   <symbol id="i-cenik" viewBox="0 0 24 24"><path d="M4 5.5h16M4 12h16M4 18.5h9"/><circle cx="18" cy="18.5" r="2.2"/></symbol>
 </defs></svg>
 
@@ -89,19 +91,14 @@
   </header>
 
   <main>
-    <section class="poznamky" aria-labelledby="ukoly-titulek">
-      <header class="poznamky-hlava">
+    <section class="listecky" aria-labelledby="ukoly-titulek">
+      <header class="listecky-hlava">
         <svg class="icon"><use href="#i-ukol"/></svg>
-        <h2 id="ukoly-titulek">Poznámky a úkoly</h2>
+        <h2 id="ukoly-titulek">Lístečky</h2>
         <span class="panel-pocet" id="ukoly-pocet">0</span>
       </header>
-      <form class="pu-novy" id="ukol-form" autocomplete="off">
-        <input id="novy-ukol" placeholder="Napiš, co je potřeba vyřešit…" aria-label="Nová poznámka nebo úkol">
-        <select id="novy-ukol-zakazka" aria-label="K zakázce"><option value="">Bez zakázky</option></select>
-        <button type="submit" class="btn-pridat"><svg class="icon"><use href="#i-plus"/></svg> Přidat</button>
-      </form>
-      <ul class="pu-seznam" id="ukoly-seznam"></ul>
-      <div id="ukoly-hotove"></div>
+      <ul class="listecky-seznam" id="ukoly-seznam"></ul>
+      <div class="listecky-vyrizene" id="ukoly-hotove"></div>
     </section>
 
     <nav class="ovladani">
@@ -110,6 +107,7 @@
         <button class="zalozka" role="tab" data-filtr="hotove" aria-selected="false">Hotové <b id="p-hotove">0</b></button>
       </div>
       <button class="zalozka-cenik" data-akce="cenik"><svg class="icon"><use href="#i-cenik"/></svg> Ceník</button>
+      <button class="zalozka-cenik skryto" data-akce="reklamy" id="btn-reklamy"><svg class="icon"><use href="#i-graf"/></svg> Reklamy</button>
       <button class="btn-nova" id="btn-nova"><svg class="icon"><use href="#i-plus"/></svg> Nová zakázka</button>
     </nav>
     <section id="plocha"></section>
@@ -139,5 +137,6 @@
 <script src="vendor/morphdom.min.js"></script>
 <script src="config.js"></script>
 <script src="app.js"></script>
+<script src="vlastni.js"></script>
 </body>
 </html>

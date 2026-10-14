@@ -53,6 +53,7 @@ function denCesky(datum) {
 
 function kdyKratce(iso) {
   const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
   const min = (Date.now() - d.getTime()) / 60000;
   if (min < 1) return 'právě teď';
   if (min < 60) return `před ${Math.floor(min)} min`;
@@ -161,6 +162,10 @@ async function odemkni(heslo) {
 const SOUBOR_ZAKAZKY = 'data/zakazky.json';
 const SOUBOR_UKOLY = 'data/aktivita.json';  /* poznámky a úkoly */
 const SOUBOR_CENIK = 'data/cenik.json';
+/* Volitelné moduly zapíná config.js (`moduly`), ať se kokpit dá klientovi
+   přizpůsobit bez rozdvojení kódu. */
+const MODUL_REKLAMY = !!CFG.moduly?.reklamy;
+const SOUBOR_REKLAMY = 'data/reklamy.json';
 
 const GH = {
   token: null,
@@ -284,10 +289,12 @@ function zpravaCommitu(zprava, { doSouhrnu = true } = {}) {
 /* ---------------------------------------------------------- stav */
 
 const JA = { role: null, jmeno: null };
-const S = { zakazky: [], ukoly: [], cenik: { polozky: [], podminky: '' } };
+const S = { zakazky: [], ukoly: [], cenik: { polozky: [], podminky: '' }, reklamy: { napojeni: [], reporty: [] } };
 const UI = {
   filtr: pamet.cti(ulozKlic('filtr')) || 'aktivni', hledat: '', otevrena: null,
   ukladam: 0, hraje: new Set(), rozbaleno: new Set(), ukazHotove: false,
+  /* Rozepsaný nový lísteček a úprava otevřeného — přežijí překreslení i synchronizaci. */
+  novyListek: { text: '', zakazka: '' }, uprava: null,
 };
 
 
@@ -588,6 +595,7 @@ function prevezmi(kam) {
   if (!cerstve) return;
   if (kam === SOUBOR_ZAKAZKY) S.zakazky = cerstve.zakazky.map(normalizuj);
   else if (kam === SOUBOR_CENIK) S.cenik = cerstve;
+  else if (kam === SOUBOR_REKLAMY) S.reklamy = { napojeni: cerstve.napojeni || [], reporty: cerstve.reporty || [] };
   else S.ukoly = cerstve.polozky || [];
 }
 
@@ -634,6 +642,8 @@ function vykresli() {
   vykresliUkoly();
   vykresliPlochu();
   if (UI.otevrena) vykresliSuplik();
+  /* vlastni.js konkrétního kokpitu se může navázat: překreslení smaže, co do DOM přidal. */
+  document.dispatchEvent(new CustomEvent('kokpit:prekresleno'));
 }
 
 /* Pořadí zakázek = pořadí v datech. Mění se přetažením karty. */
@@ -645,45 +655,165 @@ function vyfiltrovane() {
       ...z.napady.map((n) => n.text), ...Object.values(z.komentare).map((k) => k.text)].join(' ').toLowerCase().includes(h));
 }
 
-/* ---------------------------------------------------------- poznámky a úkoly */
+/* ---------------------------------------------------------- lístečky */
+
+/* Poznámky a úkoly jako papírové lístečky (vzor z kokpitu Pragerových kostek).
+   Barva a natočení se berou z id, ne z pořadí — jinak by lístečky při každém
+   novém přeskakovaly. Data jsou pořád data/aktivita.json, položky {id,text,hotovo,
+   zakazka,kdo,role,kdy}. */
+function cisloListku(id) {
+  let h = 0;
+  for (const c of String(id)) h = (h * 31 + c.charCodeAt(0)) % 9973;
+  return h;
+}
+
+function moznostiZakazek(zvolena) {
+  return `<option value="">Bez zakázky</option>${S.zakazky
+    .filter((z) => z.stav === 'aktivni' || z.id === zvolena)
+    .map((z) => `<option value="${esc(z.id)}" ${z.id === zvolena ? 'selected' : ''}>${esc(z.nazev)}</option>`).join('')}`;
+}
 
 function vykresliUkoly() {
-  const otevrene = S.ukoly.filter((u) => !u.hotovo).sort((a, b) => (b.kdy || '').localeCompare(a.kdy || ''));
-  const hotove = S.ukoly.filter((u) => u.hotovo).sort((a, b) => (b.kdy || '').localeCompare(a.kdy || ''));
+  const nejnovejsi = (a, b) => (b.kdy || '').localeCompare(a.kdy || '');
+  const otevrene = S.ukoly.filter((u) => !u.hotovo).sort(nejnovejsi);
+  const hotove = S.ukoly.filter((u) => u.hotovo).sort(nejnovejsi);
+  /* Otevřený lísteček, který mezitím někdo smazal, se zavře — rozepsaný text ukážeme. */
+  if (UI.uprava && !S.ukoly.some((u) => u.id === UI.uprava.id)) {
+    if (UI.uprava.text.trim() !== UI.uprava.puvodni.trim()) {
+      hlaska(`Lísteček, který jsi upravoval, mezitím někdo smazal. Tvůj text: „${UI.uprava.text.slice(0, 200)}“`, 'chyba');
+    }
+    UI.uprava = null;
+  }
 
   $('#ukoly-pocet').textContent = otevrene.length;
-  $('#ukoly-seznam').innerHTML = otevrene.map(polozkaUkolu).join('')
-    || '<li class="pu-prazdno">Nic otevřeného. Napiš, co je potřeba vyřešit.</li>';
+  prekresli($('#ukoly-seznam'), novyListek() + otevrene.map(listek).join(''));
 
-  $('#ukoly-hotove').innerHTML = hotove.length ? `
-    <button class="pu-rozbalit" data-akce="ukoly-hotove" aria-expanded="${UI.ukazHotove}">
-      ${UI.ukazHotove ? 'Skrýt hotové' : `Hotové (${hotove.length})`}
+  prekresli($('#ukoly-hotove'), hotove.length ? `
+    <button class="listecky-prepinac" data-akce="ukoly-hotove" aria-expanded="${UI.ukazHotove}">
+      Vyřízené (${hotove.length})
     </button>
-    ${UI.ukazHotove ? `<ul class="pu-seznam">${hotove.map(polozkaUkolu).join('')}</ul>` : ''}` : '';
+    ${UI.ukazHotove ? `<ul class="listecky-seznam vyrizene">${hotove.map(listek).join('')}</ul>` : ''}` : '');
+  $$('.listecky textarea').forEach(dorovnej);
+}
 
-  /* Výběr zakázky přestavíme, jen když v něm zrovna nikdo nevybírá. */
-  const vyber = $('#novy-ukol-zakazka');
-  if (document.activeElement !== vyber) {
-    const zvolena = vyber.value;
-    vyber.innerHTML = '<option value="">Bez zakázky</option>'
-      + S.zakazky.filter((z) => z.stav === 'aktivni').map((z) => `<option value="${esc(z.id)}">${esc(z.nazev)}</option>`).join('');
-    vyber.value = S.zakazky.some((z) => z.id === zvolena) ? zvolena : '';
+function novyListek() {
+  const n = UI.novyListek;
+  return `
+    <li class="listecek listecek-novy" id="listek-novy">
+      <form id="ukol-form" autocomplete="off">
+        <textarea id="novy-ukol" class="listecek-pole" rows="3" placeholder="Napiš lísteček — co je potřeba vyřešit…"
+                  aria-label="Nový lísteček">${esc(n.text)}</textarea>
+        <div class="listecek-spodek">
+          <select id="novy-ukol-zakazka" class="listecek-vyber" aria-label="K zakázce">${moznostiZakazek(n.zakazka)}</select>
+          <button type="submit" class="listecek-btn hlavni">Přilepit</button>
+        </div>
+      </form>
+    </li>`;
+}
+
+function listek(u) {
+  const n = cisloListku(u.id);
+  const z = u.zakazka && najdi(u.zakazka);
+  const otevreny = UI.uprava?.id === u.id;
+  const tridy = `listecek listecek-b${n % 3} listecek-r${n % 2}${u.hotovo ? ' listecek-vyrizeny' : ''}${otevreny ? ' listecek-otevreny' : ''}`;
+  const kdy = new Date(u.kdy);
+  const kdyText = Number.isNaN(kdy.getTime()) ? '' : otevreny ? dtPlne.format(kdy) : kdyKratce(u.kdy);
+  const meta = `${esc(u.kdo || '')}${kdyText ? ' · ' + esc(kdyText) : ''}`;
+
+  if (otevreny) {
+    return `
+      <li class="${tridy}" id="listek-${esc(u.id)}">
+        <div class="listecek-obsah" role="group" aria-label="Lísteček">
+          <textarea class="listecek-pole" data-listek-text="${esc(u.id)}" rows="4" aria-label="Text lístečku">${esc(UI.uprava.text)}</textarea>
+          <div class="listecek-spodek">
+            <select class="listecek-vyber" data-listek-zakazka="${esc(u.id)}" aria-label="K zakázce">${moznostiZakazek(UI.uprava.zakazka)}</select>
+            <span class="listecek-meta">${meta}</span>
+          </div>
+          <div class="listecek-tlacitka">
+            <button class="listecek-btn hlavni" data-akce="listek-ulozit" data-uid="${esc(u.id)}">Uložit</button>
+            <button class="listecek-btn" data-akce="ukol-prepnout" data-uid="${esc(u.id)}">${u.hotovo ? 'Vrátit mezi otevřené' : 'Vyřízeno'}</button>
+            <button class="listecek-btn tichy" data-akce="listek-zavrit">Zavřít</button>
+            <button class="listecek-btn zrus" data-akce="listek-smazat" data-uid="${esc(u.id)}">Smazat</button>
+          </div>
+        </div>
+      </li>`;
+  }
+  return `
+    <li class="${tridy}" id="listek-${esc(u.id)}">
+      <button class="listecek-telo" data-akce="listek-otevrit" data-uid="${esc(u.id)}" aria-expanded="false">
+        <span class="listecek-text">${esc(u.text)}</span>
+        <span class="listecek-meta">${meta}</span>
+      </button>
+      ${z ? `<button class="listecek-zakazka" data-akce="otevri" data-id="${esc(z.id)}">${esc(z.nazev)}</button>` : ''}
+      <button class="listecek-fajfka" data-akce="ukol-prepnout" data-uid="${esc(u.id)}" role="checkbox" aria-checked="${!!u.hotovo}"
+              title="${u.hotovo ? 'Vrátit mezi otevřené' : 'Vyřízeno'}" aria-label="${u.hotovo ? 'Vrátit mezi otevřené' : 'Vyřízeno'}">
+        <svg class="icon"><use href="#i-fajfka"/></svg>
+      </button>
+    </li>`;
+}
+
+async function pridejListek() {
+  const pole = $('#novy-ukol');
+  if (pole) UI.novyListek.text = pole.value;  /* co je vidět, to se uloží */
+  const text = UI.novyListek.text.trim();
+  if (!text) return pole?.focus();
+  const polozka = {
+    id: uid('u'), text, hotovo: false, zakazka: UI.novyListek.zakazka,
+    kdo: JA.jmeno, role: JA.role, kdy: nyni(),
+  };
+  UI.novyListek = { text: '', zakazka: '' };
+  if (pole) pole.value = '';
+  S.ukoly = [...S.ukoly, polozka];
+  vykresliUkoly();
+  const k = polozka.zakazka && najdi(polozka.zakazka);
+  const ok = await uloz({ nadpis: k ? `Nový lísteček k ${k.nazev}` : 'Nový lísteček', detail: text }, SOUBOR_UKOLY,
+    (dd) => { (dd.polozky = dd.polozky || []).push(polozka); });
+  if (!ok) {
+    /* Nepovedlo se — text se vrátí do pole. Když už tam někdo píše další, nepřepisujeme ho. */
+    const ted = $('#novy-ukol');
+    if (!(ted ? ted.value : UI.novyListek.text).trim()) {
+      UI.novyListek = { text, zakazka: polozka.zakazka };
+      if (ted) { ted.value = text; dorovnej(ted); }
+    } else {
+      hlaska(`Lísteček se neuložil: „${text.slice(0, 200)}“ — zkopíruj si ho a zkus to znovu.`, 'chyba');
+    }
+    synchronizuj();
   }
 }
 
-function polozkaUkolu(u) {
-  const z = u.zakazka && najdi(u.zakazka);
-  return `
-    <li class="pu ${u.hotovo ? 'hotovy' : ''}">
-      <button class="pu-zaskrt" data-akce="ukol-prepnout" data-uid="${esc(u.id)}" role="checkbox"
-              aria-checked="${!!u.hotovo}" aria-label="${u.hotovo ? 'Vrátit mezi otevřené' : 'Hotovo'}">
-        <svg class="icon"><use href="#i-fajfka"/></svg>
-      </button>
-      <button class="pu-text" data-akce="ukol-upravit" data-uid="${esc(u.id)}">${esc(u.text)}</button>
-      ${z ? `<button class="pu-zakazka" data-akce="otevri" data-id="${esc(z.id)}">${esc(z.nazev)}</button>` : ''}
-      <span class="pu-kdo">${esc(u.kdo || '')}${u.kdy ? ' · ' + esc(kdyKratce(u.kdy)) : ''}</span>
-    </li>`;
+async function ulozListek(id) {
+  const u = S.ukoly.find((x) => x.id === id);
+  const draft = UI.uprava;
+  if (!u || draft?.id !== id) return;
+  const text = draft.text.trim();
+  if (!text) return hlaska('Prázdný lísteček neuložím — když už není potřeba, dej Smazat.', 'chyba');
+  if (text === u.text && (draft.zakazka || '') === (u.zakazka || '')) { UI.uprava = null; return vykresliUkoly(); }
+  /* Druhá strana lísteček mezitím přepsala — nepřepisovat to naslepo. */
+  if (u.text !== draft.puvodni) {
+    const ukazka = u.text.length > 140 ? u.text.slice(0, 140) + '…' : u.text;
+    if (!await potvrd({ titulek: 'Mezitím to změnil někdo jiný', popis: `Teď je tam: „${ukazka}“. Uložit místo toho tvoji verzi?`, okText: 'Uložit moji', nebezpeci: false })) return;
+  }
+  UI.uprava = null;
+  u.text = text;
+  u.zakazka = draft.zakazka || '';
+  vykresliUkoly();
+  const ok = await uloz({ nadpis: 'Upravený lísteček', detail: text }, SOUBOR_UKOLY, (dd) => {
+    const cil = (dd.polozky || []).find((x) => x.id === id);
+    if (!cil) throw new Error('Tenhle lísteček už mezitím někdo smazal.');
+    cil.text = text;
+    cil.zakazka = draft.zakazka || '';
+  });
+  if (ok) hlaska('Uloženo.', 'uspech');
+  else {
+    UI.uprava = draft;  /* rozepsaný text zůstane otevřený, ať jde uložit znovu */
+    vykresliUkoly();
+    synchronizuj();
+  }
 }
+
+/* Je v otevřeném lístečku něco neuloženého? */
+const upravaZmenena = () => UI.uprava && (UI.uprava.text.trim() !== UI.uprava.puvodni.trim()
+  || (UI.uprava.zakazka || '') !== (S.ukoly.find((x) => x.id === UI.uprava.id)?.zakazka || ''));
 
 /* ---------------------------------------------------------- nástěnka */
 
@@ -829,6 +959,8 @@ function vykresliSuplik() {
   const suplik = $('#suplik');
   if (UI.otevrena === CENIK) {
     prekresli(suplik, htmlCenik());
+  } else if (UI.otevrena === REKLAMY) {
+    prekresli(suplik, htmlReklamy());
   } else {
     const z = najdi(UI.otevrena);
     if (!z) return zavri();
@@ -1177,6 +1309,157 @@ function htmlCenik() {
     </div>`;
 }
 
+/* ---------------------------------------------------------- reklamy */
+
+/* Modul Reklamy: co od klienta potřebujeme (napojení) a týdenní reporty
+   z Google Ads a Mety s doporučeními, která klient schvaluje tady.
+   Reporty zapisuje studio skriptem skillu (kokpit.py reklamy-report). */
+const REKLAMY = '#reklamy';
+const cislo = new Intl.NumberFormat('cs-CZ', { maximumFractionDigits: 0 });
+const cislo1 = new Intl.NumberFormat('cs-CZ', { maximumFractionDigits: 1, minimumFractionDigits: 1 });
+const STAVY_DOPORUCENI = {
+  navrh: { nazev: 'Návrh', co: 'navrženo' },
+  schvaleno: { nazev: 'Schváleno', co: 'schváleno' },
+  zamitnuto: { nazev: 'Nechceme', co: 'zamítnuto' },
+  hotovo: { nazev: 'Hotovo', co: 'hotovo' },
+};
+
+function obdobi(od, d) {
+  const a = new Date(od + 'T12:00:00'), b = new Date(d + 'T12:00:00');
+  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return `${od || ''} – ${d || ''}`;
+  if (a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth()) return `${a.getDate()}.–${dtDen.format(b)}`;
+  return `${dtKratce.format(a)} – ${dtDen.format(b)}`;
+}
+
+/* Ukazatele kanálu; „lepší“ říká, kterým směrem je změna dobrá (barva šipky). */
+function ukazatele(k) {
+  const ctr = (x) => (x?.zobrazeni ? (100 * (x.prokliky || 0)) / x.zobrazeni : null);
+  const cpa = (x) => (x?.konverze ? (x.utrata || 0) / x.konverze : null);
+  const p = k.predchozi || null;
+  return [
+    { nazev: 'Útrata', hodnota: k.utrata, minule: p?.utrata, format: (v) => `${cislo.format(v)} Kč`, lepsi: 0 },
+    { nazev: 'Prokliky', hodnota: k.prokliky, minule: p?.prokliky, format: (v) => cislo.format(v), lepsi: 1 },
+    { nazev: 'CTR', hodnota: ctr(k), minule: ctr(p), format: (v) => `${cislo1.format(v)} %`, lepsi: 1 },
+    { nazev: 'Konverze', hodnota: k.konverze, minule: p?.konverze, format: (v) => cislo1.format(v).replace(/,0$/, ''), lepsi: 1 },
+    { nazev: 'Cena za konverzi', hodnota: cpa(k), minule: cpa(p), format: (v) => `${cislo.format(v)} Kč`, lepsi: -1 },
+  ];
+}
+
+function dlazdice(u) {
+  const ma = typeof u.hodnota === 'number' && Number.isFinite(u.hodnota);
+  let zmena = '';
+  if (ma && typeof u.minule === 'number' && u.minule > 0) {
+    const proc = Math.round((100 * (u.hodnota - u.minule)) / u.minule);
+    if (proc !== 0) {
+      const dobre = u.lepsi === 0 ? '' : (proc > 0) === (u.lepsi > 0) ? ' dobre' : ' spatne';
+      zmena = `<span class="kpi-zmena${dobre}">${proc > 0 ? '▲' : '▼'} ${Math.abs(proc)} %</span>`;
+    }
+  }
+  return `
+    <div class="kpi">
+      <span class="kpi-nazev">${esc(u.nazev)}</span>
+      <span class="kpi-hodnota">${ma ? esc(u.format(u.hodnota)) : '—'}</span>
+      ${zmena}
+    </div>`;
+}
+
+function htmlReport(r, rozbaleny) {
+  const kanaly = r.kanaly || [];
+  const doporuceni = r.doporuceni || [];
+  const kSchvaleni = doporuceni.filter((x) => (x.stav || 'navrh') === 'navrh').length;
+  const souhrn = kanaly.reduce((a, k) => ({ utrata: a.utrata + (k.utrata || 0), konverze: a.konverze + (k.konverze || 0) }), { utrata: 0, konverze: 0 });
+  return panel({
+    ikona: 'i-graf',
+    titulek: obdobi(r.od, r.do),
+    pocet: kSchvaleni || null,
+    akce: `<button class="pridat" data-akce="report-rozbalit" data-rid="${esc(r.id)}" aria-expanded="${rozbaleny}">${rozbaleny ? 'Sbalit' : 'Rozbalit'}</button>`,
+    obsah: !rozbaleny ? `
+      <button class="report-kratce" data-akce="report-rozbalit" data-rid="${esc(r.id)}">
+        <span>${cislo.format(souhrn.utrata)} Kč</span><span>${cislo1.format(souhrn.konverze).replace(/,0$/, '')} konverzí</span>
+        ${kSchvaleni ? `<span class="report-ceka">${kSchvaleni} ${kSchvaleni === 1 ? 'doporučení čeká' : 'doporučení čekají'} na schválení</span>` : ''}
+      </button>` : `
+      ${r.shrnuti ? `<p class="report-shrnuti">${esc(r.shrnuti)}</p>` : ''}
+      ${kanaly.map((k) => `
+        <div class="report-kanal">
+          <h4>${esc(k.nazev || k.kanal)}${k.poznamka ? ` <small>${esc(k.poznamka)}</small>` : ''}</h4>
+          <div class="kpi-mrizka">${ukazatele(k).map(dlazdice).join('')}</div>
+          ${(k.kampane || []).length ? `
+            <div class="report-tabulka" role="table" aria-label="Kampaně ${esc(k.nazev || k.kanal)}">
+              <div class="rt-radek rt-hlava" role="row"><span role="columnheader">Kampaň</span><span role="columnheader">Útrata</span><span role="columnheader">Prokliky</span><span role="columnheader">Konverze</span></div>
+              ${k.kampane.map((c) => `
+                <div class="rt-radek" role="row">
+                  <span role="cell">${esc(c.nazev)}${c.stav ? ` <small>${esc(c.stav)}</small>` : ''}</span>
+                  <span role="cell">${typeof c.utrata === 'number' ? cislo.format(c.utrata) + ' Kč' : '—'}</span>
+                  <span role="cell">${typeof c.prokliky === 'number' ? cislo.format(c.prokliky) : '—'}</span>
+                  <span role="cell">${typeof c.konverze === 'number' ? cislo1.format(c.konverze).replace(/,0$/, '') : '—'}</span>
+                </div>`).join('')}
+            </div>` : ''}
+        </div>`).join('')}
+      ${doporuceni.length ? `
+        <div class="report-doporuceni">
+          <h4>Doporučení</h4>
+          ${doporuceni.map((x) => polozkaDoporuceni(r, x)).join('')}
+        </div>` : ''}
+      ${upravOdkaz(r.odkaz) ? `<a class="mini zlaty" href="${esc(upravOdkaz(r.odkaz))}" target="_blank" rel="noopener">Celý report <svg class="icon"><use href="#i-odkaz"/></svg></a>` : ''}`,
+  });
+}
+
+function polozkaDoporuceni(r, x) {
+  const stav = STAVY_DOPORUCENI[x.stav] ? x.stav : 'navrh';
+  const tl = (novy, text, trida = '') => `<button class="mini ${trida}" data-akce="doporuceni" data-rid="${esc(r.id)}" data-did="${esc(x.id)}" data-stav="${novy}">${text}</button>`;
+  return `
+    <div class="dop dop-${stav}">
+      <div class="dop-text">
+        <p>${esc(x.text)}</p>
+        ${x.dopad ? `<small>${esc(x.dopad)}</small>` : ''}
+      </div>
+      <div class="dop-akce">
+        <span class="dop-stav">${STAVY_DOPORUCENI[stav].nazev}${x.kdo && stav !== 'navrh' ? ` · ${esc(x.kdo)}` : ''}</span>
+        ${stav === 'navrh' ? tl('schvaleno', 'Schválit', 'zlaty') + tl('zamitnuto', 'Nechceme') : ''}
+        ${stav === 'schvaleno' ? tl('hotovo', 'Hotovo') + tl('navrh', 'Vrátit') : ''}
+        ${stav === 'zamitnuto' || stav === 'hotovo' ? tl('navrh', 'Vrátit') : ''}
+      </div>
+    </div>`;
+}
+
+function htmlNapojeni(napojeni) {
+  return `<div class="napojeni">${napojeni.map((n) => `
+    <div class="nap ${n.stav === 'hotovo' ? 'hotovo' : ''}">
+      <button class="nap-fajfka" data-akce="napojeni" data-nid="${esc(n.id)}" role="checkbox" aria-checked="${n.stav === 'hotovo'}"
+              aria-label="${esc(n.nazev)}: ${n.stav === 'hotovo' ? 'hotovo' : 'zatím ne'}"><svg class="icon"><use href="#i-fajfka"/></svg></button>
+      <div class="nap-text">
+        <b>${esc(n.nazev)}</b>
+        ${n.co ? `<p>${esc(n.co)}</p>` : ''}
+        ${n.stav === 'hotovo' && n.kdo ? `<small>${esc(n.kdo)}${n.kdy ? ' · ' + esc(kdyKratce(n.kdy)) : ''}</small>` : ''}
+      </div>
+    </div>`).join('')}</div>`;
+}
+
+function htmlReklamy() {
+  const napojeni = S.reklamy.napojeni || [];
+  const reporty = [...(S.reklamy.reporty || [])].sort((a, b) => String(b.do || '').localeCompare(String(a.do || '')));
+  const chybi = napojeni.filter((n) => n.stav !== 'hotovo').length;
+  const panelNapojeni = napojeni.length ? panel({
+    ikona: 'i-odkaz', titulek: 'Napojení — co od vás potřebujeme', pocet: chybi || null,
+    obsah: `<p class="napojeni-uvod">Přístupy dáváte na <b>${esc(CFG.studioEmail || 'frantisekdron@gmail.com')}</b>. Hesla ani platební údaje nikdy nepotřebujeme — účty i platby zůstávají vaše.</p>${htmlNapojeni(napojeni)}`,
+  }) : '';
+  return `
+    <div class="suplik-hlava">
+      <div class="sh-radek">
+        <span class="kod">REKLAMY</span>
+        <span class="rozpera"></span>
+        <button class="ikonbtn" data-akce="zavri" aria-label="Zavřít"><svg class="icon"><use href="#i-krizek"/></svg></button>
+      </div>
+      <h2>Reklamy a výsledky</h2>
+      <p class="cenik-uvod">${reporty.length ? 'Pravidelný souhrn z Google Ads a Mety. Doporučení tady schvalujete — bez schválení v účtech nic neměníme.' : 'Jakmile bude napojení hotové, budou tu pravidelné reporty s doporučeními.'}</p>
+    </div>
+    <div class="suplik-telo">
+      ${!reporty.length || chybi ? panelNapojeni : ''}
+      ${reporty.map((r, i) => htmlReport(r, UI.rozbaleno.has('report:' + r.id) !== (i === 0))).join('')}
+      ${reporty.length && !chybi ? panelNapojeni : ''}
+    </div>`;
+}
+
 /* ---------------------------------------------------------- šuplík */
 
 function otevri(id) {
@@ -1194,9 +1477,9 @@ function otevri(id) {
   $('.suplik-telo')?.scrollTo(0, 0);
 }
 
-function otevriCenik() {
-  if (UI.otevrena !== CENIK) $('#suplik').innerHTML = '';
-  UI.otevrena = CENIK;
+function otevriCenik(klic = CENIK) {
+  if (UI.otevrena !== klic) $('#suplik').innerHTML = '';
+  UI.otevrena = klic;
   UI.hraje.clear();
   $('#suplik').classList.add('otevreno');
   $('#suplik').setAttribute('aria-hidden', 'false');
@@ -1311,6 +1594,46 @@ async function akce(jmeno, prvek) {
 
   if (jmeno === 'cenik') return otevriCenik();
 
+  /* ----- reklamy ----- */
+
+  if (jmeno === 'reklamy') return otevriCenik(REKLAMY);
+
+  if (jmeno === 'report-rozbalit') {
+    const klic = 'report:' + d.rid;
+    if (UI.rozbaleno.has(klic)) UI.rozbaleno.delete(klic); else UI.rozbaleno.add(klic);
+    return vykresliSuplik();
+  }
+
+  if (jmeno === 'doporuceni') {
+    const r = S.reklamy.reporty.find((x) => x.id === d.rid);
+    const dop = r?.doporuceni?.find((x) => x.id === d.did);
+    if (!dop) return;
+    const stav = d.stav;
+    Object.assign(dop, { stav, kdo: JA.jmeno, kdy: nyni() });  /* hned vidět */
+    vykresliSuplik();
+    const ok = await uloz({ nadpis: `Reklamy — doporučení ${STAVY_DOPORUCENI[stav].co}`, detail: dop.text }, SOUBOR_REKLAMY, (dd) => {
+      const cil = (dd.reporty || []).find((x) => x.id === d.rid)?.doporuceni?.find((x) => x.id === d.did);
+      if (!cil) throw new Error('Tohle doporučení už v reportu není.');
+      Object.assign(cil, { stav, kdo: JA.jmeno, kdy: nyni() });
+    });
+    if (!ok) synchronizuj();
+    return;
+  }
+
+  if (jmeno === 'napojeni') {
+    const n = S.reklamy.napojeni.find((x) => x.id === d.nid);
+    if (!n) return;
+    const stav = n.stav === 'hotovo' ? 'ceka' : 'hotovo';
+    Object.assign(n, { stav, kdo: JA.jmeno, kdy: nyni() });
+    vykresliSuplik();
+    const ok = await uloz({ nadpis: `Reklamy — napojení ${n.nazev}: ${stav === 'hotovo' ? 'hotovo' : 'zatím ne'}` }, SOUBOR_REKLAMY, (dd) => {
+      const cil = (dd.napojeni || []).find((x) => x.id === d.nid);
+      if (cil) Object.assign(cil, { stav, kdo: JA.jmeno, kdy: nyni() });
+    });
+    if (!ok) synchronizuj();
+    return;
+  }
+
   if (jmeno === 'cenik-pridat' || jmeno === 'cenik-polozka') {
     const p = jmeno === 'cenik-polozka' ? (S.cenik.polozky || []).find((x) => x.id === d.pid) : null;
     const skupiny = [...new Set((S.cenik.polozky || []).map((x) => x.skupina).filter(Boolean))];
@@ -1352,10 +1675,13 @@ async function akce(jmeno, prvek) {
   if (jmeno === 'ukol-prepnout') {
     const u = S.ukoly.find((x) => x.id === d.uid);
     if (!u) return;
+    if (UI.uprava?.id === u.id && upravaZmenena()) await ulozListek(u.id);  /* rozepsané nejdřív uložit */
+    if (UI.uprava?.id === u.id && upravaZmenena()) return;  /* uložení se nepovedlo nebo ho zrušil */
     const hotovo = !u.hotovo;
     u.hotovo = hotovo;  /* hned vidět, uložení doběhne na pozadí */
+    if (UI.uprava?.id === u.id) UI.uprava = null;
     vykresliUkoly();
-    const ok = await uloz({ nadpis: hotovo ? 'Úkol hotový' : 'Úkol znovu otevřený', detail: u.text }, SOUBOR_UKOLY, (dd) => {
+    const ok = await uloz({ nadpis: hotovo ? 'Lísteček vyřízený' : 'Lísteček znovu otevřený', detail: u.text }, SOUBOR_UKOLY, (dd) => {
       const cil = (dd.polozky || []).find((x) => x.id === u.id);
       if (cil) cil.hotovo = hotovo;
     });
@@ -1363,31 +1689,38 @@ async function akce(jmeno, prvek) {
     return;
   }
 
-  if (jmeno === 'ukol-upravit') {
+  if (jmeno === 'listek-otevrit') {
     const u = S.ukoly.find((x) => x.id === d.uid);
     if (!u) return;
-    const v = await dialog({
-      titulek: 'Poznámka',
-      pole: [
-        { klic: 'text', label: 'Text', typ: 'textarea', hodnota: u.text },
-        { klic: 'zakazka', label: 'K zakázce', typ: 'select', hodnota: u.zakazka || '',
-          volby: [{ id: '', nazev: 'Bez zakázky' }, ...S.zakazky.map((z) => ({ id: z.id, nazev: z.nazev }))] },
-      ],
-      okText: 'Uložit',
-      navic: 'Smazat',
-    });
-    if (!v) return;
-    if (v.navic) {
-      if (!await potvrd({ titulek: 'Smazat poznámku?', popis: `„${u.text.slice(0, 80)}" zmizí.`, okText: 'Smazat' })) return;
-      return uloz({ nadpis: 'Smazaná poznámka', detail: u.text }, SOUBOR_UKOLY, (dd) => { dd.polozky = (dd.polozky || []).filter((x) => x.id !== u.id); });
+    if (UI.uprava && UI.uprava.id !== u.id && upravaZmenena()) {
+      await ulozListek(UI.uprava.id);  /* rozepsaný jiný lísteček neztratit */
+      if (UI.uprava) return;  /* neuložilo se — zůstane otevřený ten rozepsaný */
     }
-    if (!v.text) return;
-    return uloz({ nadpis: 'Upravená poznámka', detail: v.text }, SOUBOR_UKOLY, (dd) => {
-      const cil = (dd.polozky || []).find((x) => x.id === u.id);
-      if (!cil) throw new Error('Tuhle poznámku už mezitím někdo smazal.');
-      cil.text = v.text;
-      cil.zakazka = v.zakazka || '';
-    });
+    UI.uprava = { id: u.id, text: u.text, puvodni: u.text, zakazka: u.zakazka || '' };
+    vykresliUkoly();
+    const pole = $(`[data-listek-text="${CSS.escape(u.id)}"]`);
+    if (pole) { dorovnej(pole); pole.focus(); pole.setSelectionRange(pole.value.length, pole.value.length); }
+    return;
+  }
+
+  if (jmeno === 'listek-zavrit') {
+    UI.uprava = null;
+    return vykresliUkoly();
+  }
+
+  if (jmeno === 'listek-ulozit') return ulozListek(d.uid);
+
+  if (jmeno === 'listek-smazat') {
+    const u = S.ukoly.find((x) => x.id === d.uid);
+    if (!u) return;
+    if (!await potvrd({ titulek: 'Smazat lísteček?', popis: `„${u.text.slice(0, 80)}" zmizí.`, okText: 'Smazat' })) return;
+    UI.uprava = null;
+    S.ukoly = S.ukoly.filter((x) => x.id !== u.id);
+    vykresliUkoly();
+    const ok = await uloz({ nadpis: 'Smazaný lísteček', detail: u.text }, SOUBOR_UKOLY,
+      (dd) => { dd.polozky = (dd.polozky || []).filter((x) => x.id !== u.id); });
+    if (!ok) synchronizuj();
+    return;
   }
 
   /* Klik na štítek na kartě ukáže všechny zakázky se stejnou předností. */
@@ -1790,17 +2123,19 @@ async function ulozPoleHned(prvek) {
 /* ---------------------------------------------------------- načtení */
 
 async function nactiVse({ podminene = false } = {}) {
-  const [z, k, c] = await Promise.all([
+  const [z, k, c, rk] = await Promise.all([
     GH.nacti(SOUBOR_ZAKAZKY, { podminene }),
     GH.nacti(SOUBOR_UKOLY, { podminene }),
     GH.nacti(SOUBOR_CENIK, { podminene }).catch(() => ({ zmeneno: false })),
+    MODUL_REKLAMY ? GH.nacti(SOUBOR_REKLAMY, { podminene }).catch(() => ({ zmeneno: false })) : { zmeneno: false },
   ]);
   let zmena = false;
   if (z.zmeneno) { S.zakazky = (z.data.zakazky || []).map(normalizuj); zmena = true; }
   if (k.zmeneno) { S.ukoly = k.data.polozky || []; zmena = true; }
   if (c.zmeneno) { S.cenik = { polozky: c.data.polozky || [], podminky: c.data.podminky || '' }; zmena = true; }
+  if (rk.zmeneno) { S.reklamy = { napojeni: rk.data.napojeni || [], reporty: rk.data.reporty || [] }; zmena = true; }
   if (zmena) {
-    pamet.pis(ulozKlic('cache'), JSON.stringify({ zakazky: S.zakazky, ukoly: S.ukoly, cenik: S.cenik }));
+    pamet.pis(ulozKlic('cache'), JSON.stringify({ zakazky: S.zakazky, ukoly: S.ukoly, cenik: S.cenik, reklamy: S.reklamy }));
     vykresli();
   }
   return zmena;
@@ -1847,6 +2182,7 @@ async function spust(token, role, jmeno) {
     if (c) {
       S.zakazky = (c.zakazky || []).map(normalizuj);
       S.ukoly = c.ukoly || [];
+      S.reklamy = c.reklamy || S.reklamy;
       S.cenik = c.cenik || S.cenik;
       vykresli();
     }
@@ -1903,8 +2239,13 @@ $('#zamek-form').addEventListener('submit', async (e) => {
   }
 });
 
+/* Akce, po kterých se položka hned přesune nebo vymění tlačítka — druhý klik
+   dvojkliku by jinak trefil souseda (vyřídil další lísteček, schválil a hned „Hotovo“). */
+const JEN_JEDNOU = new Set(['ukol-prepnout', 'doporuceni', 'napojeni', 'listek-otevrit', 'listek-smazat', 'report-rozbalit']);
+
 document.addEventListener('click', (e) => {
   const prvek = e.target.closest('[data-akce]');
+  if (prvek && e.detail > 1 && JEN_JEDNOU.has(prvek.dataset.akce)) { e.preventDefault(); return; }
   if (prvek) { e.preventDefault(); return akce(prvek.dataset.akce, prvek); }
   if (e.target.closest('#zaves')) zavri();
 });
@@ -1982,23 +2323,39 @@ document.addEventListener('submit', (e) => {
   pridejPrednost(form.dataset.zakazka, text);
 });
 
-/* Nová poznámka — Enter nebo tlačítko, ukáže se hned a uloží na pozadí. */
-$('#ukol-form').addEventListener('submit', async (e) => {
+const DOTYK = matchMedia('(pointer: coarse)').matches;
+
+/* Lístečky: rozepsaný text se drží v UI, ať ho překreslení nesmaže.
+   Enter přilepí / uloží, Shift+Enter dělá nový řádek, Escape zavře. */
+document.addEventListener('submit', (e) => {
+  if (e.target.id !== 'ukol-form') return;
   e.preventDefault();
-  const vstup = $('#novy-ukol');
-  const text = vstup.value.trim();
-  if (!text) return vstup.focus();
-  const polozka = {
-    id: uid('u'), text, hotovo: false, zakazka: $('#novy-ukol-zakazka').value,
-    kdo: JA.jmeno, role: JA.role, kdy: nyni(),
-  };
-  vstup.value = '';
-  S.ukoly = [...S.ukoly, polozka];
-  vykresliUkoly();
-  const k = polozka.zakazka && najdi(polozka.zakazka);
-  const ok = await uloz({ nadpis: k ? `Nová poznámka k ${k.nazev}` : 'Nová poznámka', detail: text }, SOUBOR_UKOLY,
-    (dd) => { (dd.polozky = dd.polozky || []).push(polozka); });
-  if (!ok) { vstup.value = text; synchronizuj(); }
+  pridejListek();
+});
+document.addEventListener('input', (e) => {
+  const t = e.target;
+  if (t.id === 'novy-ukol') { UI.novyListek.text = t.value; dorovnej(t); }
+  else if (t.dataset?.listekText && UI.uprava?.id === t.dataset.listekText) { UI.uprava.text = t.value; dorovnej(t); }
+});
+document.addEventListener('change', (e) => {
+  const t = e.target;
+  if (t.id === 'novy-ukol-zakazka') UI.novyListek.zakazka = t.value;
+  else if (t.dataset?.listekZakazka && UI.uprava?.id === t.dataset.listekZakazka) UI.uprava.zakazka = t.value;
+});
+document.addEventListener('keydown', (e) => {
+  const t = e.target;
+  if (!t.matches?.('#novy-ukol, [data-listek-text]')) return;
+  /* Na telefonu není Shift+Enter, Enter tam musí dělat nový řádek — ukládá se tlačítkem. */
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && !DOTYK) {
+    e.preventDefault();
+    if (t.id === 'novy-ukol') pridejListek();
+    else ulozListek(t.dataset.listekText);
+  } else if (e.key === 'Escape' && t.dataset.listekText) {
+    e.preventDefault();
+    e.stopPropagation();
+    UI.uprava = null;
+    vykresliUkoly();
+  }
 });
 
 /* Přetahování karet — jeden posluchač na celé ploše, karty se překreslují. */
@@ -2062,6 +2419,24 @@ $('#btn-role').addEventListener('click', async () => {
   $('#zamek-dvojice').textContent = dvojice(KLIENT);
   $('#znacka-text').textContent = dvojice(CFG.klientKratce || KLIENT);
   $('meta[name="apple-mobile-web-app-title"]')?.setAttribute('content', CFG.klientKratce || 'Zakázky');
+  if (MODUL_REKLAMY) $('#btn-reklamy')?.classList.remove('skryto');
+  /* Logo klienta místo obecné značky. Tmavé logo dostane světlý podklad. */
+  if (CFG.logo?.soubor) {
+    /* Když se logo nenačte, vrátí se původní znak — ne ikona rozbitého obrázku. */
+    const vymen = (puvodni, soubory, trida) => {
+      if (!puvodni) return;
+      const img = Object.assign(document.createElement('img'), {
+        alt: KLIENT, className: trida + (CFG.logo.podklad === 'svetly' ? ' na-svetlem' : ''),
+      });
+      let poradi = 0;
+      const zkus = () => { if (poradi < soubory.length) img.src = soubory[poradi]; else img.replaceWith(puvodni); };
+      img.addEventListener('error', () => { poradi++; zkus(); });
+      zkus();
+      puvodni.replaceWith(img);
+    };
+    vymen($('.zamek-znak'), [CFG.logo.soubor], 'zamek-logo');
+    vymen($('.znacka svg'), [CFG.logo.znak, CFG.logo.soubor].filter(Boolean), 'znacka-logo');
+  }
 })();
 
 /* obnovení sezení */
