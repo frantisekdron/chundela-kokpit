@@ -21,6 +21,8 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
 const CFG = window.CFG || {};
 const KLIENT = CFG.klient || 'Klient';
 const STUDIO = CFG.studio || 'Studio';
+/* Přihlášení e-mailem: config.js → "prihlaseni": {url, kokpit}. Bez něj heslo jako dřív. */
+const PRIHLASENI = CFG.prihlaseni?.url && CFG.prihlaseni?.kokpit ? CFG.prihlaseni : null;
 
 /* Kokpity všech klientů běží na stejné adrese (…github.io), takže sdílejí
    localStorage. Každý si proto drží svoje klíče pod jménem svého datového repa,
@@ -129,8 +131,11 @@ async function desifruj(blobB64, heslo) {
 
 /* Otisk klíčů z config.js. Když se klíč vymění, uložené přihlášení
    v prohlížeči přestane platit a kokpit si řekne o heslo znovu —
-   jinak by lidem donekonečna zůstal viset ten starý, už neplatný. */
-const otiskKlicu = () => Object.values(CFG.blobs || {}).map((b) => String(b || '').slice(-32)).join('|');
+   jinak by lidem donekonečna zůstal viset ten starý, už neplatný.
+   Přechod na přihlášení e-mailem otisk změní taky — staré heslové sezení neplatí. */
+const otiskKlicu = () => (PRIHLASENI
+  ? `email|${PRIHLASENI.url}|${PRIHLASENI.kokpit}`
+  : Object.values(CFG.blobs || {}).map((b) => String(b || '').slice(-32)).join('|'));
 
 /* Dřív existoval jen kokpit Chundely a klíče v prohlížeči neměly jméno repa.
    Převezmou se jen tam, kde k nim sedí otisk klíče — tedy u téhož kokpitu. */
@@ -157,6 +162,44 @@ async function odemkni(heslo) {
   return null;
 }
 
+/* ---------------------------------------------------------- přihlášení e-mailem
+   Vrátný (Apps Script ze skillu kokpit-zakazek, souhrn/prihlaseni.gs) pošle na
+   povolený e-mail 6místný kód a za správný kód vydá sezení. Za sezení dává
+   krátkodobý přístup k datům (GitHub App, platí hodinu) — kokpit si ho obnovuje sám. */
+const VRATNY = {
+  async zavolej(akce, data = {}) {
+    let r;
+    try {
+      r = await fetch(PRIHLASENI.url, { method: 'POST', body: JSON.stringify({ akce, kokpit: PRIHLASENI.kokpit, ...data }) });
+    } catch {
+      throw new Error('Nepodařilo se spojit s přihlašováním. Zkontroluj připojení a zkus to znovu.');
+    }
+    let j = null;
+    try { j = await r.json(); } catch {}
+    if (!j) throw new Error('Přihlašování teď neodpovídá. Zkus to za chvíli znovu.');
+    if (!j.ok) throw Object.assign(new Error(j.chyba || 'Přihlášení se nepovedlo.'), { kod: j.kod || '' });
+    return j;
+  },
+};
+
+/* Platný přístup k datům; o 5 minut dřív, než vyprší, si řekne o nový.
+   Souběžná volání čekají na jednu obnovu. */
+let obnovaTokenu = null;
+async function cerstvyToken(vynutit = false) {
+  const sez = JSON.parse(pamet.cti(ulozKlic('sez')) || 'null');
+  if (!sez?.sezeni) throw Object.assign(new Error('Přihlášení vypršelo. Přihlas se znovu e-mailem.'), { stav: 401 });
+  if (!vynutit && GH.token && Date.parse(sez.platnost || 0) - Date.now() > 5 * 60e3) return GH.token;
+  obnovaTokenu ??= VRATNY.zavolej('token', { sezeni: sez.sezeni })
+    .then((j) => {
+      GH.token = j.token;
+      pamet.pis(ulozKlic('sez'), JSON.stringify({ ...sez, token: j.token, platnost: j.platnost }));
+      return j.token;
+    })
+    .catch((err) => { if (err.kod === 'sezeni') err.stav = 401; throw err; })
+    .finally(() => { obnovaTokenu = null; });
+  return obnovaTokenu;
+}
+
 /* ---------------------------------------------------------- GitHub */
 
 const SOUBOR_ZAKAZKY = 'data/zakazky.json';
@@ -172,16 +215,25 @@ const GH = {
   etag: {},
   mezipamet: {},
 
-  volej: (cesta, nastaveni = {}) => fetch('https://api.github.com' + cesta, {
-    cache: 'no-store',
-    ...nastaveni,
-    headers: {
-      Authorization: 'Bearer ' + GH.token,
-      Accept: 'application/vnd.github+json',
-      'X-GitHub-Api-Version': '2022-11-28',
-      ...(nastaveni.headers || {}),
-    },
-  }),
+  /* U přihlášení e-mailem platí přístup hodinu: před voláním se případně obnoví,
+     a když ho GitHub přesto odmítne (401), obnoví se a zkusí jednou znovu. */
+  async volej(cesta, nastaveni = {}) {
+    if (PRIHLASENI) await cerstvyToken();
+    const posli = () => fetch('https://api.github.com' + cesta, {
+      cache: 'no-store',
+      ...nastaveni,
+      headers: {
+        Authorization: 'Bearer ' + GH.token,
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+        ...(nastaveni.headers || {}),
+      },
+    });
+    const r = await posli();
+    if (r.status !== 401 || !PRIHLASENI) return r;
+    await cerstvyToken(true);
+    return posli();
+  },
 
   cesta: (soubor) => `/repos/${CFG.owner}/${CFG.repo}/contents/${soubor}`,
 
@@ -189,7 +241,10 @@ const GH = {
      a „neexistuje" — obojí vrátí 404. Doptáme se tedy na repozitář
      a řekneme rovnou, co je špatně a kde to opravit. */
   async chyba(r) {
-    if (r.status === 401) return 'Přístupový klíč vypršel nebo byl zrušen. Vyrob nový přes nastav_pristup.py.';
+    if (r.status === 401) {
+      return PRIHLASENI ? 'Přihlášení vypršelo. Přihlas se znovu e-mailem.'
+        : 'Přístupový klíč vypršel nebo byl zrušen. Vyrob nový přes nastav_pristup.py.';
+    }
     if (r.status === 403 || r.status === 404) {
       const potize = await GH.procNejde();
       if (potize) return potize;
@@ -210,6 +265,7 @@ const GH = {
     try {
       const r = await GH.volej(`/repos/${CFG.owner}/${CFG.repo}`);
       if (r.status === 404) {
+        if (PRIHLASENI) return 'Kokpit teď nemá přístup k datům. Dej vědět studiu.';
         return `Přístupový klíč nevidí repozitář ${CFG.owner}/${CFG.repo}. V nastavení klíče na GitHubu musí být pod Repository access vybraný právě tenhle repozitář.`;
       }
       if (!r.ok) return null;
@@ -1430,6 +1486,16 @@ function htmlNapojeni(napojeni) {
       <div class="nap-text">
         <b>${esc(n.nazev)}</b>
         ${n.co ? `<p>${esc(n.co)}</p>` : ''}
+        ${n.odkaz || (n.kopirovat || []).length ? `
+          <div class="nap-akce">
+            ${n.odkaz ? `<a class="mini zlaty" href="${esc(n.odkaz)}" target="_blank" rel="noopener">${esc(n.odkazText || 'Otevřít')} <svg class="icon"><use href="#i-odkaz"/></svg></a>` : ''}
+            ${(n.kopirovat || []).map((k) => `
+              <button class="mini" data-akce="kopirovat" data-text="${esc(k.hodnota)}" title="Zkopírovat do schránky">${esc(k.popis)}: <b>${esc(k.hodnota)}</b></button>`).join('')}
+          </div>` : ''}
+        ${n.pole ? `
+          <label class="nap-pole"><span>${esc(n.pole.popis)}</span>
+            <input class="vstup" data-napojeni-pole="${esc(n.id)}" value="${esc(n.hodnota || '')}"
+                   placeholder="${esc(n.pole.priklad || '')}" autocomplete="off" spellcheck="false"></label>` : ''}
         ${n.stav === 'hotovo' && n.kdo ? `<small>${esc(n.kdo)}${n.kdy ? ' · ' + esc(kdyKratce(n.kdy)) : ''}</small>` : ''}
       </div>
     </div>`).join('')}</div>`;
@@ -1617,6 +1683,16 @@ async function akce(jmeno, prvek) {
       Object.assign(cil, { stav, kdo: JA.jmeno, kdy: nyni() });
     });
     if (!ok) synchronizuj();
+    return;
+  }
+
+  if (jmeno === 'kopirovat') {
+    try {
+      await navigator.clipboard.writeText(d.text);
+      hlaska(`Zkopírováno: ${d.text}`, 'uspech');
+    } catch {
+      hlaska(`Zkopírujte si ručně: ${d.text}`);
+    }
     return;
   }
 
@@ -2161,6 +2237,11 @@ async function synchronizuj(hlasitost = 'ticho') {
 /* ---------------------------------------------------------- start */
 
 function odhlas(duvod) {
+  if (PRIHLASENI) {
+    const sez = JSON.parse(pamet.cti(ulozKlic('sez')) || 'null');
+    if (sez?.sezeni) VRATNY.zavolej('odhlasit', { sezeni: sez.sezeni }).catch(() => {});
+    zamekKrok('email');
+  }
   pamet.smaz(ulozKlic('sez'));
   GH.token = null;
   $('#app').classList.add('skryto');
@@ -2199,10 +2280,89 @@ async function spust(token, role, jmeno) {
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') synchronizuj(); });
 }
 
+/* ---------------------------------------------------------- zámek pro přihlášení e-mailem
+   Dva kroky ve stejném formuláři: e-mail → „Poslat kód“, pak kód → „Přihlásit“. */
+const ZAMEK = { krok: 'email', email: '' };
+
+function zamekEmailem() {
+  $('#zamek-form').innerHTML = `
+    <input type="email" id="zamek-email" placeholder="E-mail" autocomplete="email" inputmode="email"
+           autocapitalize="off" spellcheck="false" aria-label="E-mail">
+    <input type="text" id="zamek-kod" class="skryto" placeholder="Kód z e-mailu" autocomplete="one-time-code"
+           inputmode="numeric" maxlength="7" aria-label="Kód z e-mailu">
+    <button type="submit" id="zamek-btn">Poslat kód</button>
+    <button type="button" class="zamek-zpet skryto" id="zamek-zpet">Jiný e-mail nebo nový kód</button>
+    <p class="zamek-chyba" id="zamek-chyba" role="alert"></p>`;
+  $('#zamek-zpet').addEventListener('click', () => { $('#zamek-chyba').textContent = ''; zamekKrok('email'); });
+  $('#zamek-email').value = pamet.cti(ulozKlic('email')) || '';
+  zamekKrok('email', { zamerit: false });
+}
+
+function zamekKrok(krok, { zamerit = true } = {}) {
+  const email = $('#zamek-email');
+  if (!email) return;
+  const kod = $('#zamek-kod');
+  ZAMEK.krok = krok;
+  email.classList.toggle('skryto', krok !== 'email');
+  email.required = krok === 'email';
+  kod.classList.toggle('skryto', krok !== 'kod');
+  kod.required = krok === 'kod';
+  $('#zamek-zpet').classList.toggle('skryto', krok !== 'kod');
+  $('#zamek-btn').textContent = krok === 'kod' ? 'Přihlásit' : 'Poslat kód';
+  $('.zamek-popis').textContent = krok === 'kod'
+    ? `Kód jsme poslali na ${ZAMEK.email}. Platí 10 minut.`
+    : 'Napiš svůj e-mail. Pošleme ti na něj kód pro přihlášení.';
+  if (zamerit) (krok === 'kod' ? kod : email).focus();
+}
+
+async function prihlasEmailem() {
+  const btn = $('#zamek-btn');
+  $('#zamek-chyba').textContent = '';
+  btn.disabled = true;
+  try {
+    if (ZAMEK.krok !== 'kod') {
+      ZAMEK.email = $('#zamek-email').value.trim().toLowerCase();
+      btn.textContent = 'Posílám kód…';
+      await VRATNY.zavolej('kod', { email: ZAMEK.email });
+      $('#zamek-kod').value = '';
+      zamekKrok('kod');
+      return;
+    }
+    btn.textContent = 'Ověřuji…';
+    const j = await VRATNY.zavolej('overit', { email: ZAMEK.email, kod: $('#zamek-kod').value });
+    /* Jméno z povolených e-mailů — kromě toho, které si člověk sám změnil (a je to pořád on). */
+    let jmeno = pamet.cti(ulozKlic('email')) === ZAMEK.email ? pamet.cti(ulozKlic('jmeno')) : '';
+    jmeno = jmeno || j.jmeno || '';
+    if (!jmeno) {
+      const v = await dialog({
+        titulek: 'Jak se podepisovat?',
+        popis: 'Tohle jméno uvidí druhá strana u každého komentáře.',
+        pole: [{ klic: 'jmeno', label: 'Jméno', hodnota: CFG.jmena?.[j.role] || '', placeholder: 'Křestní jméno' }],
+        okText: 'Pokračovat',
+      });
+      jmeno = (v?.jmeno || '').trim().slice(0, 40) || CFG.jmena?.[j.role] || ZAMEK.email.split('@')[0];
+    }
+    pamet.pis(ulozKlic('jmeno'), jmeno);
+    pamet.pis(ulozKlic('email'), ZAMEK.email);
+    pamet.pis(ulozKlic('sez'), JSON.stringify({
+      sezeni: j.sezeni, token: j.token, platnost: j.platnost, role: j.role, email: ZAMEK.email, otisk: otiskKlicu(),
+    }));
+    await spust(j.token, j.role, jmeno);
+  } catch (err) {
+    $('#zamek-chyba').textContent = err.message;
+    if (err.kod === 'kod-vyprsel') zamekKrok('email');
+    else if (ZAMEK.krok === 'kod') $('#zamek-kod').select();
+  } finally {
+    btn.disabled = false;
+    btn.textContent = ZAMEK.krok === 'kod' ? 'Přihlásit' : 'Poslat kód';
+  }
+}
+
 /* ---------------------------------------------------------- posluchači */
 
 $('#zamek-form').addEventListener('submit', async (e) => {
   e.preventDefault();
+  if (PRIHLASENI) return prihlasEmailem();
   const btn = $('#zamek-btn');
   $('#zamek-chyba').textContent = '';
   btn.disabled = true;
@@ -2264,7 +2424,7 @@ document.addEventListener('focusin', (e) => {
    rozepsaná podoba roku byla commit) a pole dostane aktuální hodnotu — mohla
    se změnit, zatímco v něm byl kurzor a překreslování ho vynechávalo. */
 document.addEventListener('focusout', (e) => {
-  if (!e.target.matches?.('#suplik [data-pole], #suplik [data-cenik-pole]')) return;
+  if (!e.target.matches?.('#suplik [data-pole], #suplik [data-cenik-pole], #suplik [data-napojeni-pole]')) return;
   if (e.target.type === 'date') ulozPole(e.target);
   setTimeout(() => { if (UI.otevrena && !$('#dlg').open) vykresliSuplik(); }, 0);
 });
@@ -2280,6 +2440,19 @@ document.addEventListener('change', (e) => {
     if (String(S.cenik[klic] ?? '') === nova) return;
     uloz('Ceník — podmínky', SOUBOR_CENIK, (dd) => { dd[klic] = nova; });
   }
+  /* Číslo účtu a podobné údaje k napojení reklam — vyplní klient, studio je čte
+     z data/reklamy.json (kokpit.py reklamy-nastav <kokpit> --z-kokpitu). */
+  if (e.target.matches('[data-napojeni-pole]')) {
+    const id = e.target.dataset.napojeniPole;
+    const n = (S.reklamy.napojeni || []).find((x) => x.id === id);
+    const nova = e.target.value.trim();
+    if (!n || String(n.hodnota ?? '') === nova) return;
+    Object.assign(n, { hodnota: nova });
+    uloz({ nadpis: `Reklamy — napojení ${n.nazev}: ${nova || 'údaj smazán'}` }, SOUBOR_REKLAMY, (dd) => {
+      const cil = (dd.napojeni || []).find((x) => x.id === id);
+      if (cil) Object.assign(cil, { hodnota: nova, vyplnil: JA.jmeno, vyplneno: nyni() });
+    });
+  }
 });
 document.addEventListener('input', (e) => { if (e.target.matches('#suplik textarea')) dorovnej(e.target); });
 
@@ -2292,12 +2465,12 @@ document.addEventListener('keydown', (e) => {
     return akce(e.target.dataset.akce, e.target);
   }
   /* Enter v políčku ho potvrdí — bez toho by to vypadalo, že se nic neuložilo. */
-  if (e.key === 'Enter' && e.target.matches?.('input[data-pole], input[data-cenik-pole]')) {
+  if (e.key === 'Enter' && e.target.matches?.('input[data-pole], input[data-cenik-pole], input[data-napojeni-pole]')) {
     e.preventDefault();
     return e.target.blur();
   }
   if (e.key === 'Escape' && UI.otevrena && !$('#dlg').open) {
-    if (document.activeElement?.matches?.('[data-pole], [data-cenik-pole]')) document.activeElement.blur();
+    if (document.activeElement?.matches?.('[data-pole], [data-cenik-pole], [data-napojeni-pole]')) document.activeElement.blur();
     zavri();
   }
   if (e.key === '/' && document.activeElement === document.body) { e.preventDefault(); $('#hledat').focus(); }
@@ -2441,6 +2614,17 @@ $('#btn-role').addEventListener('click', async () => {
 
 /* obnovení sezení */
 (async () => {
+  if (PRIHLASENI) {
+    zamekEmailem();
+    try {
+      const sez = JSON.parse(pamet.cti(ulozKlic('sez')) || 'null');
+      const jmeno = pamet.cti(ulozKlic('jmeno'));
+      if (!sez?.sezeni || !jmeno) return;
+      if (sez.otisk !== otiskKlicu()) { pamet.smaz(ulozKlic('sez')); return; }
+      await spust(sez.token, sez.role, jmeno);
+    } catch {}
+    return;
+  }
   if (!window.CFG?.blobs || !Object.values(CFG.blobs).some(Boolean)) {
     $('#zamek-chyba').textContent = 'Kokpit ještě nemá nastavený přístup. Spusť nastavení podle README.';
     $('#zamek-heslo').disabled = true;

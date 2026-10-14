@@ -85,6 +85,14 @@ a { color: var(--gold); text-underline-offset: 3px; }
 .zamek button[type="submit"]:hover { background: var(--gold-hi); }
 .zamek button[type="submit"]:disabled { opacity: 0.5; cursor: wait; }
 .zamek-chyba { color: var(--rust); font-size: 13px; min-height: 20px; margin: 4px 0 0; }
+/* přihlášení e-mailem */
+.zamek #zamek-kod { font-family: var(--font-mono); font-size: 20px; letter-spacing: 0.35em; }
+.zamek #zamek-kod::placeholder { font-family: var(--font-ui); font-size: 15px; letter-spacing: 0.06em; }
+.zamek-zpet {
+  align-self: center; padding: 4px 8px; font-size: 13px; color: var(--muted);
+  text-decoration: underline; text-underline-offset: 3px;
+}
+.zamek-zpet:hover { color: var(--gold); }
 
 /* ---------------------------------------------------- horní lišta */
 
@@ -955,6 +963,15 @@ button.stitek:hover { background: rgba(var(--gold-rgb), 0.24); border-color: var
 .nap-text p { margin: 3px 0 0; font-size: 13px; line-height: 1.5; color: var(--muted); white-space: pre-wrap; }
 .nap-text small { display: block; margin-top: 3px; font-family: var(--font-mono); font-size: 10.5px; color: var(--muted-2); }
 .nap.hotovo b { color: var(--muted); }
+/* napojení přímo z kokpitu: odkaz na správnou stránku, kopírování, kolonka pro číslo účtu */
+.nap-akce { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.nap-akce .mini b { font-family: var(--font-mono); font-weight: 400; letter-spacing: 0.02em; color: var(--paper); }
+.nap-pole { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; }
+.nap-pole span {
+  font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted-2);
+}
+.nap-pole .vstup { margin: 0; width: 100%; padding: 7px 10px; border: 1px solid var(--line); background: var(--ink); font-size: 13.5px; }
+.nap-pole .vstup:focus { border-color: var(--gold-dim); }
 
 @media (max-width: 560px) {
   .rt-radek { grid-template-columns: minmax(0, 1fr) 78px 58px; }
