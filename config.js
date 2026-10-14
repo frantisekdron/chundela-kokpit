@@ -13,6 +13,13 @@ window.CFG = {
     "studio": "Franta",
     "klient": "Honza"
   },
+  "studioEmail": "frantisekdron@gmail.com",
+  "moduly": {},
+  "logo": {
+    "soubor": "logo.png",
+    "znak": "logo-znak.png",
+    "podklad": "zadny"
+  },
   "iterace": 600000,
   "blobs": {
     "studio": "bl66x9dqfCeSWQyykbt/JW5a0W69ExhMLosrUu+oM6XtqGmdtHveUrOZk1cTEjqjXkowSplS8FWx1tuLAE6W62wTQnmFsdXHKBqY58rOLWugHGY/NSk0Al5AO3BM1JC256jN/F23g3HOKVXQq8Y19U9Idh6BgFNiWKKQVmFZj7YIMxnhCandklA=",
