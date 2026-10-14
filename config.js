@@ -14,7 +14,9 @@ window.CFG = {
     "klient": "Honza"
   },
   "studioEmail": "frantisekdron@gmail.com",
-  "moduly": {},
+  "moduly": {
+    "reklamy": true
+  },
   "logo": {
     "soubor": "logo.png",
     "znak": "logo-znak.png",
