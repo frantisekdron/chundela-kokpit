@@ -42,9 +42,11 @@ souhrn toho, co se v kokpitu od minula změnilo — rozdělený podle zakázek,
 s obsahem (text poznámky, komentáře, nápadu) a podpisem, kdo to udělal.
 Když se nic nezměnilo, e-mail nepřijde.
 
-Běží jako Google Apps Script pod frantisekdron@gmail.com (stejně jako
-hlídač Poutníka), zdroj je `tools/notifikace/notifikace.gs`. Postup
-nasazení je v hlavičce toho souboru. Google spouští v čase ± 15 minut.
+Běží jako jeden Google Apps Script pod frantisekdron@gmail.com pro všechny
+kokpity zakázek (za každý kokpit chodí vlastní e-mail). Zdroj je ve skillu
+`kokpit-zakazek` (`souhrn/notifikace.gs`), seznam kokpitů do něj doplní
+`kokpit.py souhrn`. Postup nasazení je v hlavičce souboru. Google spouští
+v čase ± 15 minut.
 
 Kokpit k tomu do každé změny zapisuje podpis (`Autor:`, `Zakázka:`),
 samotné nahrávání souborů má `Souhrn: ne` — informaci nese zápis do
@@ -84,23 +86,29 @@ Když token vyprší nebo ho někdo zruší, spusť to znovu. Hesla můžou zůs
 
 ## Úpravy
 
-Uprav `index.html`, `styles.css` nebo `app.js` a nasaď:
+Tenhle kokpit je první ze sady — další makléři dostávají stejný přes skill
+`kokpit-zakazek` (Frantův Mac, `~/.claude/skills/kokpit-zakazek`).
+**Společné soubory** (`index.html`, `styles.css`, `app.js`, `nastav_pristup.py`,
+`nasadit.sh`, `vendor/`) se upravují v šabloně skillu a do všech kokpitů
+najednou je přenese:
 
 ```bash
-./nasadit.sh "co jsem změnil"
+python3 ~/.claude/skills/kokpit-zakazek/scripts/kokpit.py aktualizovat --nasadit "co se změnilo"
 ```
 
+Tady ručně jen vlastní soubory tohohle kokpitu (`config.js`, `znacka.css`,
+`icon.svg`, `manifest.json`, README) a pak `./nasadit.sh "co jsem změnil"`.
 Data se tím netýkají — ta jsou v druhém repu a mění se přímo z aplikace.
 
 | Soubor | K čemu |
 |---|---|
 | `index.html` | kostra stránky a ikony |
-| `styles.css` | vizuální systém (zlatá a antracit ze značky Chundela Reality) |
+| `styles.css` | vizuální systém (barvy značky přepisuje `znacka.css`) |
 | `app.js` | šifrování, vrstva nad GitHub API, vykreslování, akce |
-| `config.js` | zašifrované přístupové klíče — generuje `nastav_pristup.py` |
+| `config.js` | repozitář dat, jména (klient, studio, výchozí podpisy) a zašifrované přístupové klíče — klíče generuje `nastav_pristup.py` |
+| `znacka.css` | barvy značky klienta (zlatá a tyrkys Chundela Reality) |
 | `vendor/morphdom.min.js` | knihovna, která při překreslení mění jen to, co se liší (kurzor, rozepsaný text i hrající video zůstanou) — MIT, licence vedle |
 | `vendor/fflate.min.js` | balení ZIPu pro „Stáhnout vše" přímo v prohlížeči, načte se až po kliknutí — MIT, licence vedle |
-| `tools/notifikace/notifikace.gs` | e-mailový souhrn změn (Google Apps Script), postup nasazení v hlavičce |
 
 ---
 

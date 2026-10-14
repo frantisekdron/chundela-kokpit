@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Nasadí aktuální stav kokpitu na web (GitHub Pages).
-# Data zakázek se tímhle netýká — ta žijí v privátním repu chundela-data.
+# Data zakázek se tímhle netýká — ta žijí v privátním datovém repu klienta.
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -19,6 +19,8 @@ fi
 git commit -m "${1:-Úprava kokpitu}"
 git push origin main
 
+# https://github.com/vlastnik/repo(.git) → https://vlastnik.github.io/repo/
+adresa=$(git remote get-url origin | sed -E 's#^(https://github.com/|git@github.com:)##; s#\.git$##')
 echo
 echo "Nasazeno. Za chvíli bude živé na:"
-echo "  https://frantisekdron.github.io/chundela-kokpit/"
+echo "  https://${adresa%%/*}.github.io/${adresa#*/}/"

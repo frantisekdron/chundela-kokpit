@@ -20,6 +20,7 @@ import os
 import subprocess
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -87,7 +88,7 @@ def overit_klic(klic: str, owner: str, repo: str):
     # Skutečná zkouška zápisu — ať se to nezjistí až v prohlížeči.
     stav, telo = gh(
         f"/repos/{owner}/{repo}/contents/{ZKUSEBNI_SOUBOR}", klic, "PUT",
-        {"message": "Ověření přístupu", "content": base64.b64encode(b"ok").decode()},
+        {"message": "Ověření přístupu\n\nSouhrn: ne", "content": base64.b64encode(b"ok").decode()},
     )
     if stav not in (200, 201):
         return ("Klíč sice repozitář vidí, ale zápis neprošel.\n"
@@ -97,7 +98,7 @@ def overit_klic(klic: str, owner: str, repo: str):
     sha = (telo.get("content") or {}).get("sha")
     if sha:
         gh(f"/repos/{owner}/{repo}/contents/{ZKUSEBNI_SOUBOR}", klic, "DELETE",
-           {"message": "Úklid po ověření", "sha": sha})
+           {"message": "Úklid po ověření\n\nSouhrn: ne", "sha": sha})
 
     print(" v pořádku, čte i zapisuje.")
     return None
@@ -122,22 +123,33 @@ def nacti_nastaveni() -> dict:
 # ---------------------------------------------------------------- dialog
 
 NAVOD = """
-  Klíč vyrobíš tady:
+  Klíč vyrobíš tady (název, vlastník, platnost a právo zápisu jsou předvyplněné):
 
-    github.com/settings/personal-access-tokens/new
+    {odkaz}
 
-    Token name .......... kokpit-chundela
+    Token name .......... {jmeno}
     Resource owner ...... {owner}
-    Expiration .......... No expiration  (nebo rok, pak se obnovuje)
-    Repository access ... Only select repositories → {owner}/{repo}
-    Permissions ......... Repository permissions → Contents → Read and write
+    Expiration .......... No expiration
+    Repository access ... Only select repositories → {owner}/{repo}   ← tohle vyber ručně
+    Permissions ......... Contents → Read and write
 
   Pak Generate token a klíč zkopíruj (začíná github_pat_).
 """
 
 
+def odkaz_na_klic(owner: str, repo: str) -> tuple:
+    """GitHub umí formulář nového klíče předvyplnit — jen repozitář se vybírá ručně."""
+    jmeno = "kokpit-" + (repo[:-5] if repo.endswith("-data") else repo)
+    dotaz = urllib.parse.urlencode({
+        "name": jmeno[:40], "description": f"Kokpit zakázek – čtení a zápis do {owner}/{repo}",
+        "target_name": owner, "expires_in": "none", "contents": "write",
+    })
+    return jmeno, "https://github.com/settings/personal-access-tokens/new?" + dotaz
+
+
 def ziskej_klic(owner: str, repo: str) -> str:
-    print(NAVOD.format(owner=owner, repo=repo))
+    jmeno, odkaz = odkaz_na_klic(owner, repo)
+    print(NAVOD.format(owner=owner, repo=repo, jmeno=jmeno, odkaz=odkaz))
     while True:
         klic = getpass.getpass("  Vlož klíč (nebude vidět): ").strip()
         if not klic:
@@ -184,7 +196,7 @@ def main() -> None:
     print("\n  Teď dvě hesla. Každá strana dostane to svoje.")
     print("  (Obě otevírají to samé — liší se jen podpisem u komentářů.)\n")
     heslo_studio = zeptej_se_na_heslo("naše studio")
-    heslo_klient = zeptej_se_na_heslo("tým Chundela Reality")
+    heslo_klient = zeptej_se_na_heslo(f"tým {nastaveni.get('klient') or 'klienta'}")
 
     if heslo_studio == heslo_klient:
         sys.exit("  Hesla musí být různá, jinak nepoznáme, kdo je kdo.")

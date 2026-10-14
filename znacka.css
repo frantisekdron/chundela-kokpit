@@ -1,0 +1,11 @@
+/* Barvy značky klienta: Chundela Reality (zlatá a tyrkys z chundelareality.cz).
+   Generuje skill kokpit-zakazek, ruční úpravy přežijí aktualizace šablony. */
+:root {
+  --gold:       #d2ba8a;
+  --gold-hi:    #ecdcb8;
+  --gold-dim:   #97865f;
+  --gold-rgb:   210, 186, 138;
+  --gold-ghost: rgba(var(--gold-rgb), 0.12);
+  --teal:       #7ebec5;
+  --teal-rgb:   126, 190, 197;
+}

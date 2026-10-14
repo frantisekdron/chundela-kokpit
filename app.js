@@ -1,5 +1,6 @@
 /* ============================================================
-   Zakázky — Chundela Reality × František Dron
+   Zakázky — sdílená nástěnka klienta a studia
+   (kdo s kým, barvy a jména jsou v config.js a znacka.css)
 
    Nahoře poznámky a úkoly, pod nimi zakázky v pořadí, jaké si
    kdo přetáhne. Zakázka = popis, adresa, TOP přednosti, odkazy, půdorysy, nápady na scénář,
@@ -15,6 +16,25 @@ const $$ = (s, k = document) => [...k.querySelectorAll(s)];
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+/* Kdo s kým — jména jsou v config.js, ať je tenhle soubor stejný pro všechny kokpity. */
+const CFG = window.CFG || {};
+const KLIENT = CFG.klient || 'Klient';
+const STUDIO = CFG.studio || 'Studio';
+
+/* Kokpity všech klientů běží na stejné adrese (…github.io), takže sdílejí
+   localStorage. Každý si proto drží svoje klíče pod jménem svého datového repa,
+   jinak by se navzájem odhlašovaly a ukazovaly si cizí data z mezipaměti.
+   (Náhledy z Vimea pod „kokpit.thumb.*“ jsou veřejné a sdílet se smí.) */
+const ulozKlic = (k) => `kokpit.${CFG.repo || 'kokpit'}.${k}`;
+
+/* localStorage umí vyhodit výjimku (Safari s blokovanými cookies, prohlížeče
+   uvnitř aplikací, plná kvóta). Kokpit pak jen nic nepamatuje, ale funguje. */
+const pamet = {
+  cti: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
+  pis: (k, v) => { try { localStorage.setItem(k, v); } catch { /* zakázané nebo plné */ } },
+  smaz: (k) => { try { localStorage.removeItem(k); } catch { /* zakázané */ } },
+};
 
 const pauza = (ms) => new Promise((r) => setTimeout(r, ms));
 const nyni = () => new Date().toISOString();
@@ -73,13 +93,13 @@ const nahledy = new Map();
 async function vimeoNahled(info) {
   if (nahledy.has(info.id)) return nahledy.get(info.id);
   const klic = 'kokpit.thumb.' + info.id;
-  const ulozeny = localStorage.getItem(klic);
+  const ulozeny = pamet.cti(klic);
   if (ulozeny) { nahledy.set(info.id, ulozeny); return ulozeny; }
   const r = await fetch(`https://vimeo.com/api/oembed.json?url=${encodeURIComponent(info.verejny)}&width=800`);
   if (!r.ok) throw new Error('bez náhledu');
   const { thumbnail_url } = await r.json();
   if (!thumbnail_url) throw new Error('bez náhledu');
-  localStorage.setItem(klic, thumbnail_url);
+  pamet.pis(klic, thumbnail_url);
   nahledy.set(info.id, thumbnail_url);
   return thumbnail_url;
 }
@@ -110,6 +130,20 @@ async function desifruj(blobB64, heslo) {
    v prohlížeči přestane platit a kokpit si řekne o heslo znovu —
    jinak by lidem donekonečna zůstal viset ten starý, už neplatný. */
 const otiskKlicu = () => Object.values(CFG.blobs || {}).map((b) => String(b || '').slice(-32)).join('|');
+
+/* Dřív existoval jen kokpit Chundely a klíče v prohlížeči neměly jméno repa.
+   Převezmou se jen tam, kde k nim sedí otisk klíče — tedy u téhož kokpitu. */
+(() => {
+  try {
+    const stara = JSON.parse(pamet.cti('kokpit.sez') || 'null');
+    if (!stara || stara.otisk !== otiskKlicu()) return;
+    for (const k of ['sez', 'jmeno', 'filtr', 'cache']) {
+      const v = pamet.cti('kokpit.' + k);
+      if (v !== null && pamet.cti(ulozKlic(k)) === null) pamet.pis(ulozKlic(k), v);
+      pamet.smaz('kokpit.' + k);
+    }
+  } catch { /* poškozená stará data — přihlásí se znovu */ }
+})();
 
 async function odemkni(heslo) {
   for (const [role, blob] of Object.entries(CFG.blobs || {})) {
@@ -239,7 +273,7 @@ function zpravaCommitu(zprava, { doSouhrnu = true } = {}) {
   return [
     radek(nadpis),
     kratky ? (kratky.length > 600 ? kratky.slice(0, 600) + '…' : kratky) : '',
-    [`Autor: ${radek(JA.jmeno || '?')} (${JA.role === 'klient' ? 'Chundela Reality' : 'studio'})`,
+    [`Autor: ${radek(JA.jmeno || '?')} (${JA.role === 'klient' ? radek(KLIENT) : 'studio'})`,
      zakazka ? `Zakázka: ${radek(zakazka)}` : '',
      /* Stálý klíč skupiny v e-mailu — přežije přejmenování i doplnění ID. */
      zakazkaId ? `Zakázka-id: ${zakazkaId}` : '',
@@ -252,7 +286,7 @@ function zpravaCommitu(zprava, { doSouhrnu = true } = {}) {
 const JA = { role: null, jmeno: null };
 const S = { zakazky: [], ukoly: [], cenik: { polozky: [], podminky: '' } };
 const UI = {
-  filtr: localStorage.getItem('kokpit.filtr') || 'aktivni', hledat: '', otevrena: null,
+  filtr: pamet.cti(ulozKlic('filtr')) || 'aktivni', hledat: '', otevrena: null,
   ukladam: 0, hraje: new Set(), rozbaleno: new Set(), ukazHotove: false,
 };
 
@@ -272,12 +306,20 @@ function srovnejPrednosti(seznam) {
 
 const odkazMapy = (adresa) => `https://mapy.cz/zakladni?q=${encodeURIComponent(adresa)}`;
 
-/* Odkaz vložený bez https:// (třeba „sreality.cz/detail/…“) dostane https://. */
-const jakoOdkaz = (t) => {
+/* Odkaz z adresního řádku: bez https:// („sreality.cz/detail/…“) se doplní,
+   jinak musí být http(s) s opravdovou doménou. Vrátí podobu k uložení,
+   '' pro prázdné pole a null, když to odkaz není („později.“, „mailto:…“). */
+function upravOdkaz(t) {
   const s = String(t || '').trim();
-  return !s || /^[a-z][a-z0-9+.-]*:\/\//i.test(s) || /\s/.test(s) || !s.includes('.') ? s : 'https://' + s;
-};
-const jeOdkaz = (url) => !url || /^https?:\/\/\S+$/i.test(url);
+  if (!s) return '';
+  try {
+    const u = new URL(/^[a-z][a-z0-9+.-]*:/i.test(s) ? s : 'https://' + s);
+    if (!/^https?:$/.test(u.protocol)) return null;
+    if (!/\.(?:[a-z]{2,}|xn--[a-z0-9-]{2,})$/i.test(u.hostname)) return null;
+    return u.href;
+  } catch { return null; }
+}
+const NENI_ODKAZ = 'Tohle nevypadá jako odkaz — zkopíruj ho z adresního řádku prohlížeče.';
 
 /* Nápady na scénář se dělí na tři druhy videa. Barva drží skupinu
    pohromadě, ať se nápady pro různá videa nepletou. */
@@ -1260,8 +1302,8 @@ async function akce(jmeno, prvek) {
       pole: [{ klic: 'url', label: 'Odkaz', hodnota: z[d.klic] || '', placeholder: 'https://…' }],
     });
     if (!v) return;
-    const url = jakoOdkaz(v.url);
-    if (!jeOdkaz(url)) return hlaska('Tohle nevypadá jako odkaz — zkopíruj ho z adresního řádku prohlížeče.', 'chyba');
+    const url = upravOdkaz(v.url);
+    if (url === null) return hlaska(NENI_ODKAZ, 'chyba');
     return ulozZakazku({ nadpis: `${stitek(z)} — ${popis.toLowerCase()}`, detail: url }, z.id, (x) => { x[d.klic] = url; });
   }
 
@@ -1375,7 +1417,7 @@ async function akce(jmeno, prvek) {
     const novyStav = hotove ? 'hotove' : 'aktivni';
     z.stav = novyStav;
     UI.filtr = novyStav;
-    localStorage.setItem('kokpit.filtr', UI.filtr);
+    pamet.pis(ulozKlic('filtr'), UI.filtr);
     vykresli();
     hlaska(hotove ? 'Přesunuto mezi hotové.' : 'Zpátky mezi aktivními.', 'uspech');
     if (!await ulozZakazku(`${stitek(z)} — ${hotove ? 'hotové' : 'zpět mezi aktivní'}`, z.id, (x) => { x.stav = novyStav; })) synchronizuj();
@@ -1625,7 +1667,7 @@ async function akce(jmeno, prvek) {
   if (jmeno === 'smazat-zakazku') {
     if (!await potvrd({
       titulek: 'Smazat zakázku?',
-      popis: `„${z.nazev}" zmizí i s videi, soubory a komentáři. Zůstane v historii na GitHubu, odkud ji Franta umí vrátit.`,
+      popis: `„${z.nazev}" zmizí i s videi, soubory a komentáři. Zůstane v historii na GitHubu, odkud ji ${CFG.spravce || 'studio'} umí vrátit.`,
       okText: 'Smazat',
     })) return;
     const ok = await uloz({ nadpis: `${stitek(z)} — smazána zakázka`, zakazka: stitek(z), zakazkaId: z.id }, SOUBOR_ZAKAZKY,
@@ -1651,6 +1693,7 @@ async function novaZakazka() {
     okText: 'Založit',
   });
   if (!v?.nazev) return;
+  const inzerat = upravOdkaz(v.inzerat);
 
   const nova = {
     id: uid('z'),
@@ -1658,7 +1701,7 @@ async function novaZakazka() {
     nazev: v.nazev,
     podnazev: v.podnazev,
     adresa: v.adresa,
-    inzerat: jeOdkaz(jakoOdkaz(v.inzerat)) ? jakoOdkaz(v.inzerat) : '',
+    inzerat: inzerat ?? '',
     prednosti: [],
     nataceno: v.nataceno,
     stav: 'aktivni',
@@ -1674,12 +1717,13 @@ async function novaZakazka() {
     vytvoreno: nyni(),
   };
   UI.filtr = 'aktivni';
-  localStorage.setItem('kokpit.filtr', UI.filtr);
+  pamet.pis(ulozKlic('filtr'), UI.filtr);
   const zprava = { nadpis: `${stitek(nova)} — nová zakázka`, detail: nova.podnazev, zakazka: stitek(nova), zakazkaId: nova.id };
   /* Hned na nástěnku i do detailu — uložení doběhne na pozadí. */
   S.zakazky = [normalizuj(structuredClone(nova)), ...S.zakazky];
   vykresli();
   otevri(nova.id);
+  if (inzerat === null) hlaska('Inzerát se neuložil — nevypadá jako odkaz. Doplň ho v detailu zakázky.', 'chyba');
   if (!await uloz(zprava, SOUBOR_ZAKAZKY, (d) => { d.zakazky.unshift(nova); })) synchronizuj();
 }
 
@@ -1696,15 +1740,15 @@ async function ulozPoleHned(prvek) {
   const z = najdi(UI.otevrena);
   if (!z) return;
   const klic = prvek.dataset.pole;
-  const nova = klic === 'inzerat' ? jakoOdkaz(prvek.value)
+  const nova = klic === 'inzerat' ? upravOdkaz(prvek.value)
     : ['nazev', 'kod', 'adresa'].includes(klic) ? prvek.value.trim()
     : klic === 'podnazev' ? prvek.value.replace(/\s+$/, '') : prvek.value;
-  if (klic === 'nazev' && !nova) { prvek.value = z.nazev; return; }
-  if (klic === 'inzerat' && !jeOdkaz(nova)) {
-    hlaska('Tohle nevypadá jako odkaz — zkopíruj ho z adresního řádku prohlížeče.', 'chyba');
+  if (klic === 'nazev' && !nova) { prvek.value = z.nazev; return; }  /* zakázka bez názvu by na nástěnce zmizela */
+  if (nova === null) {
+    hlaska(NENI_ODKAZ, 'chyba');
     prvek.value = z.inzerat;
     return;
-  }  /* zakázka bez názvu by na nástěnce zmizela */
+  }
   if (klic === 'nataceno' && nova && !/^(19|20)\d\d-\d\d-\d\d$/.test(nova)) {
     hlaska('Tohle datum nevypadá správně, neuložil jsem ho.', 'chyba');
     prvek.value = z.nataceno || '';
@@ -1756,7 +1800,7 @@ async function nactiVse({ podminene = false } = {}) {
   if (k.zmeneno) { S.ukoly = k.data.polozky || []; zmena = true; }
   if (c.zmeneno) { S.cenik = { polozky: c.data.polozky || [], podminky: c.data.podminky || '' }; zmena = true; }
   if (zmena) {
-    localStorage.setItem('kokpit.cache', JSON.stringify({ zakazky: S.zakazky, ukoly: S.ukoly, cenik: S.cenik }));
+    pamet.pis(ulozKlic('cache'), JSON.stringify({ zakazky: S.zakazky, ukoly: S.ukoly, cenik: S.cenik }));
     vykresli();
   }
   return zmena;
@@ -1782,7 +1826,7 @@ async function synchronizuj(hlasitost = 'ticho') {
 /* ---------------------------------------------------------- start */
 
 function odhlas(duvod) {
-  localStorage.removeItem('kokpit.sez');
+  pamet.smaz(ulozKlic('sez'));
   GH.token = null;
   $('#app').classList.add('skryto');
   $('#zamek').classList.remove('skryto');
@@ -1799,7 +1843,7 @@ async function spust(token, role, jmeno) {
   $('#app').classList.remove('skryto');
 
   try {
-    const c = JSON.parse(localStorage.getItem('kokpit.cache') || 'null');
+    const c = JSON.parse(pamet.cti(ulozKlic('cache')) || 'null');
     if (c) {
       S.zakazky = (c.zakazky || []).map(normalizuj);
       S.ukoly = c.ukoly || [];
@@ -1834,19 +1878,22 @@ $('#zamek-form').addEventListener('submit', async (e) => {
       $('#zamek-heslo').select();
       return;
     }
-    let jmeno = localStorage.getItem('kokpit.jmeno');
+    let jmeno = pamet.cti(ulozKlic('jmeno'));
     if (!jmeno) {
       const v = await dialog({
         titulek: 'Jak se podepisovat?',
         popis: 'Tohle jméno uvidí druhá strana u každého komentáře.',
-        pole: [{ klic: 'jmeno', label: 'Jméno', hodnota: vysledek.role === 'klient' ? 'Honza' : 'Franta' }],
+        pole: [{ klic: 'jmeno', label: 'Jméno', hodnota: CFG.jmena?.[vysledek.role] || '', placeholder: 'Křestní jméno' }],
         okText: 'Pokračovat',
       });
-      if (!v?.jmeno) return;
+      if (!v?.jmeno) {
+        if (v) $('#zamek-chyba').textContent = 'Napiš jméno, pod kterým se budeš podepisovat, a otevři znovu.';
+        return;
+      }
       jmeno = v.jmeno.trim().slice(0, 40);
-      localStorage.setItem('kokpit.jmeno', jmeno);
+      pamet.pis(ulozKlic('jmeno'), jmeno);
     }
-    localStorage.setItem('kokpit.sez', JSON.stringify({ token: vysledek.token, role: vysledek.role, otisk: otiskKlicu() }));
+    pamet.pis(ulozKlic('sez'), JSON.stringify({ token: vysledek.token, role: vysledek.role, otisk: otiskKlicu() }));
     await spust(vysledek.token, vysledek.role, jmeno);
   } catch (err) {
     $('#zamek-chyba').textContent = 'Něco se pokazilo: ' + err.message;
@@ -1921,7 +1968,7 @@ $('.zalozky').addEventListener('click', (e) => {
   const b = e.target.closest('[data-filtr]');
   if (!b) return;
   UI.filtr = b.dataset.filtr;
-  localStorage.setItem('kokpit.filtr', UI.filtr);
+  pamet.pis(ulozKlic('filtr'), UI.filtr);
   vykresli();
 });
 
@@ -1995,7 +2042,7 @@ $('#btn-obnovit').addEventListener('click', () => synchronizuj('nahlas'));
 $('#btn-role').addEventListener('click', async () => {
   const v = await dialog({
     titulek: 'Podpis',
-    popis: `Jsi přihlášený za ${JA.role === 'klient' ? 'Chundela Reality' : 'studio'}. Pod tímhle jménem se podepisují komentáře.`,
+    popis: `Jsi přihlášený za ${JA.role === 'klient' ? KLIENT : 'studio'}. Pod tímhle jménem se podepisují komentáře.`,
     pole: [{ klic: 'jmeno', label: 'Jméno', hodnota: JA.jmeno }],
     okText: 'Uložit',
     navic: 'Odhlásit',
@@ -2003,10 +2050,19 @@ $('#btn-role').addEventListener('click', async () => {
   if (v?.navic) return odhlas();
   if (!v?.jmeno) return;
   JA.jmeno = v.jmeno.trim();
-  localStorage.setItem('kokpit.jmeno', JA.jmeno);
+  pamet.pis(ulozKlic('jmeno'), JA.jmeno);
   $('#me-avatar').textContent = iniciely(JA.jmeno);
   vykresli();
 });
+
+/* Popisky stránky podle toho, čí je to kokpit. */
+(() => {
+  const dvojice = (a) => `${a}\u00a0× ${STUDIO.replace(/ /g, '\u00a0')}`;
+  document.title = `Zakázky — ${KLIENT} × ${STUDIO}`;
+  $('#zamek-dvojice').textContent = dvojice(KLIENT);
+  $('#znacka-text').textContent = dvojice(CFG.klientKratce || KLIENT);
+  $('meta[name="apple-mobile-web-app-title"]')?.setAttribute('content', CFG.klientKratce || 'Zakázky');
+})();
 
 /* obnovení sezení */
 (async () => {
@@ -2017,11 +2073,11 @@ $('#btn-role').addEventListener('click', async () => {
     return;
   }
   try {
-    const sez = JSON.parse(localStorage.getItem('kokpit.sez') || 'null');
-    const jmeno = localStorage.getItem('kokpit.jmeno');
+    const sez = JSON.parse(pamet.cti(ulozKlic('sez')) || 'null');
+    const jmeno = pamet.cti(ulozKlic('jmeno'));
     if (!sez?.token || !jmeno) return;
     if (sez.otisk !== otiskKlicu()) {
-      localStorage.removeItem('kokpit.sez');
+      pamet.smaz(ulozKlic('sez'));
       $('#zamek-chyba').textContent = 'Přístupový klíč se změnil. Přihlas se prosím znovu.';
       return;
     }
