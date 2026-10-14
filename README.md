@@ -14,9 +14,11 @@ vyřešit. Každá položka jde odškrtnout a volitelně navázat na zakázku.
 Pod tím jsou **zakázky** v pořadí, jaké si kdo přetáhne (na mobilu šipkami).
 Zakázka je **aktivní** nebo **hotová** a nese:
 
-- **popis** nahoře (víc řádků),
+- **popis** nahoře (víc řádků) a **adresa** s odkazem do Mapy.cz,
+- **TOP přednosti** — štítky (bazén, les za plotem…); klik na štítek na kartě ukáže všechny zakázky se stejnou předností,
 - **odkazy** — fotky, vizualizace, 3D prohlídka a libovolné další,
 - **půdorysy** — nahrané soubory s náhledem,
+- **nápady na scénář** — zvlášť pro Sreality, prodejní reels a zábavný reel,
 - **videa** — 16:9 pro Sreality přes celou šířku, 9:16 reels vždy vedle sebe,
 - **bannery** — nahrané soubory; první čtyři vidět, zbytek sbalený.
 
@@ -30,6 +32,21 @@ přístupovým klíčem a ukazuje jako náhledy. Na soubor platí limit 10 MB.
 V řadě se záložkami Aktivní / Hotové je **ceník** — sazby za natáčení,
 fotky, reels, dotáčení a příplatky plus dodací podmínky. Řádky se dají
 klikem upravit, přidat i smazat.
+
+## E-mailový souhrn změn
+
+Každý den v **9:00, 13:00 a 22:00** přijde na honza@frantisekdron.cz
+souhrn toho, co se v kokpitu od minula změnilo — rozdělený podle zakázek,
+s obsahem (text poznámky, komentáře, nápadu) a podpisem, kdo to udělal.
+Když se nic nezměnilo, e-mail nepřijde.
+
+Běží jako Google Apps Script pod frantisekdron@gmail.com (stejně jako
+hlídač Poutníka), zdroj je `tools/notifikace/notifikace.gs`. Postup
+nasazení je v hlavičce toho souboru. Google spouští v čase ± 15 minut.
+
+Kokpit k tomu do každé změny zapisuje podpis (`Autor:`, `Zakázka:`),
+samotné nahrávání souborů má `Souhrn: ne` — informaci nese zápis do
+zakázky, takže se v e-mailu nic neopakuje.
 
 ## Jak to funguje
 
@@ -79,6 +96,8 @@ Data se tím netýkají — ta jsou v druhém repu a mění se přímo z aplikac
 | `styles.css` | vizuální systém (zlatá a antracit ze značky Chundela Reality) |
 | `app.js` | šifrování, vrstva nad GitHub API, vykreslování, akce |
 | `config.js` | zašifrované přístupové klíče — generuje `nastav_pristup.py` |
+| `vendor/morphdom.min.js` | knihovna, která při překreslení mění jen to, co se liší (kurzor, rozepsaný text i hrající video zůstanou) — MIT, licence vedle |
+| `tools/notifikace/notifikace.gs` | e-mailový souhrn změn (Google Apps Script), postup nasazení v hlavičce |
 
 ---
 

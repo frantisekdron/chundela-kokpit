@@ -2,7 +2,8 @@
    Zakázky — Chundela Reality × František Dron
 
    Nahoře poznámky a úkoly, pod nimi zakázky v pořadí, jaké si
-   kdo přetáhne. Zakázka = popis, odkazy, půdorysy, videa a bannery,
+   kdo přetáhne. Zakázka = popis, adresa, TOP přednosti, odkazy, půdorysy, nápady na scénář,
+   videa a bannery,
    každá položka může mít svůj komentář. Obě strany můžou všechno.
 
    Data leží v privátním repu na GitHubu, každá změna je commit,
@@ -209,7 +210,7 @@ const GH = {
       kopie.zmeneno = nyni();
       kopie.zmenil = JA.jmeno;
 
-      const telo = { message: zprava, content: textNaB64(JSON.stringify(kopie, null, 2)), branch: CFG.branch, sha: ulozene.sha };
+      const telo = { message: zpravaCommitu(zprava), content: textNaB64(JSON.stringify(kopie, null, 2)), branch: CFG.branch, sha: ulozene.sha };
       const r = await GH.volej(GH.cesta(soubor), { method: 'PUT', body: JSON.stringify(telo) });
 
       if (r.ok) {
@@ -225,6 +226,27 @@ const GH = {
   },
 };
 
+/* Zpráva ke commitu: první řádek = co se stalo, pod ním obsah (text poznámky,
+   komentáře…) a nakonec podpis. Z toho skládá e-mailový souhrn notifikace.gs.
+   `zprava` je buď text, nebo { nadpis, detail }. Řádek „Souhrn: ne" znamená,
+   že commit do souhrnu nepatří (samotné soubory — informaci nese zápis do JSON). */
+function zpravaCommitu(zprava, { doSouhrnu = true } = {}) {
+  const { nadpis, detail, zakazka, zakazkaId } = typeof zprava === 'string' ? { nadpis: zprava } : zprava;
+  const kratky = String(detail || '').trim();
+  /* Nadpis i podpis jsou jeden řádek se stejně srovnanými mezerami —
+     souhrn podle shody nadpisu se štítkem pozná, co se stalo. */
+  const radek = (t) => String(t).replace(/\s+/g, ' ').trim();
+  return [
+    radek(nadpis),
+    kratky ? (kratky.length > 600 ? kratky.slice(0, 600) + '…' : kratky) : '',
+    [`Autor: ${radek(JA.jmeno || '?')} (${JA.role === 'klient' ? 'Chundela Reality' : 'studio'})`,
+     zakazka ? `Zakázka: ${radek(zakazka)}` : '',
+     /* Stálý klíč skupiny v e-mailu — přežije přejmenování i doplnění ID. */
+     zakazkaId ? `Zakázka-id: ${zakazkaId}` : '',
+     doSouhrnu ? '' : 'Souhrn: ne'].filter(Boolean).join('\n'),
+  ].filter(Boolean).join('\n\n');
+}
+
 /* ---------------------------------------------------------- stav */
 
 const JA = { role: null, jmeno: null };
@@ -236,8 +258,29 @@ const UI = {
 
 
 const najdi = (id) => S.zakazky.find((z) => z.id === id);
-/* Čím zakázku pojmenovat v historii změn — ID, a když chybí, tak název. */
-const stitek = (z) => z.kod || z.nazev;
+
+/* TOP přednosti nemovitosti = krátké štítky. Bez prázdných, bez duplicit
+   (i s jinou velikostí písmen), rozumně dlouhé. */
+const MAX_PREDNOSTI = 12;
+function srovnejPrednosti(seznam) {
+  const videne = new Set();
+  return (Array.isArray(seznam) ? seznam : [])
+    .map((t) => String(t || '').replace(/\s+/g, ' ').trim().slice(0, 40))
+    .filter((t) => t && !videne.has(t.toLowerCase()) && videne.add(t.toLowerCase()))
+    .slice(0, MAX_PREDNOSTI);
+}
+
+const odkazMapy = (adresa) => `https://mapy.cz/zakladni?q=${encodeURIComponent(adresa)}`;
+
+/* Nápady na scénář se dělí na tři druhy videa. Barva drží skupinu
+   pohromadě, ať se nápady pro různá videa nepletou. */
+const DRUHY_NAPADU = {
+  sreality: { nazev: 'Sreality', format: '16:9', barva: 'zlata' },
+  prodejni: { nazev: 'Prodejní reels', format: '9:16', barva: 'teal' },
+  zabavny: { nazev: 'Zábavný reel', format: '9:16', barva: 'amber' },
+};
+/* Jak se zakázka jmenuje v historii změn a v e-mailovém souhrnu. */
+const stitek = (z) => (z.kod ? `${z.nazev} (${z.kod})` : z.nazev);
 
 /* Starší tvary dat umí přečíst i tenhle kokpit. Převody jsou schválně
    idempotentní — běží při každém načtení, dokud se zakázka neuloží. */
@@ -256,8 +299,13 @@ function normalizuj(z) {
   }
   z.odkazy = (z.odkazy || []).map((o) => ({ id: o.id || 'o-' + encodeURIComponent(o.url || o.nazev || ''), nazev: o.nazev, url: o.url }));
   z.prohlidka3d = z.prohlidka3d || '';
+  z.adresa = z.adresa || '';
+  z.prednosti = srovnejPrednosti(z.prednosti);
   z.pudorysy = z.pudorysy || [];
   z.bannery = z.bannery || [];
+  z.napady = (z.napady || []).filter((n) => n && n.text).map((n) => ({
+    id: n.id, druh: DRUHY_NAPADU[n.druh] ? n.druh : 'sreality', text: n.text, kdo: n.kdo || '', kdy: n.kdy || '',
+  }));
   z.nataceno = z.nataceno ?? z.terminNataceni ?? '';
   delete z.terminNataceni;
 
@@ -273,6 +321,7 @@ function normalizuj(z) {
   if (z.poznamka && !String(z.podnazev || '').includes(z.poznamka)) {
     z.podnazev = [z.podnazev, z.poznamka].filter(Boolean).join('\n');
   }
+  z.podnazev = String(z.podnazev || '').replace(/\s+$/, '');  /* Enter navíc na konci */
   return z;
 }
 
@@ -321,10 +370,23 @@ async function souborUrl(cesta) {
   return url;
 }
 
+/* Když mezitím uložil někdo jiný, GitHub občas vrátí konflikt (409), i když
+   jde o jiný soubor — posunula se větev. Pár pokusů s pauzou to vyřeší. */
+async function sOpakovanim(akce) {
+  for (let pokus = 0; ; pokus++) {
+    try {
+      return await akce();
+    } catch (e) {
+      if (pokus >= 3 || (e.stav !== 409 && e.stav !== 422)) throw e;
+      await pauza(400 * (pokus + 1));
+    }
+  }
+}
+
 async function nahrajDoRepa(cesta, obsahB64, zprava) {
   const r = await GH.volej(GH.cesta(cesta), {
     method: 'PUT',
-    body: JSON.stringify({ message: zprava, content: obsahB64, branch: CFG.branch }),
+    body: JSON.stringify({ message: zpravaCommitu(zprava, { doSouhrnu: false }), content: obsahB64, branch: CFG.branch }),
   });
   if (!r.ok) throw await GH.selhalo(r);
 }
@@ -336,13 +398,14 @@ async function smazZRepa(cesta, zprava) {
   const { sha } = await meta.json();
   const r = await GH.volej(GH.cesta(cesta), {
     method: 'DELETE',
-    body: JSON.stringify({ message: zprava, sha, branch: CFG.branch }),
+    body: JSON.stringify({ message: zpravaCommitu(zprava, { doSouhrnu: false }), sha, branch: CFG.branch }),
   });
   if (!r.ok) throw await GH.selhalo(r);
 }
 
 /* Doplní náhledy a odkazy do dlaždic, které jsou právě na obrazovce. */
 async function dopnutiSouboru(prvek) {
+  prvek.dataset.hotovo = '1';
   const { soubor: cesta, typ } = prvek.dataset;
   try {
     const url = await souborUrl(cesta);
@@ -386,32 +449,62 @@ function hlaskaPrubeh(text) {
 
 /* ---------------------------------------------------------- ukládání */
 
-async function uloz(zprava, kam, uprav) {
+/* Zápisy z jednoho prohlížeče jdou na GitHub jeden po druhém, v pořadí,
+   v jakém je člověk udělal. Souběžné zápisy by se sice sloučily, ale třeba
+   rychle naťukané přednosti by skončily v jiném pořadí, než jak je psal. */
+let frontaZapisu = Promise.resolve();
+
+function uloz(zprava, kam, uprav) {
   UI.ukladam++;
   $('#btn-obnovit').classList.add('tocise');
+  const zapis = frontaZapisu.then(() => ulozHned(zprava, kam, uprav));
+  frontaZapisu = zapis.catch(() => {});
+  return zapis;
+}
+
+/* Soubory, do kterých se během jedné dávky zápisů uložilo. */
+const dotcene = new Set();
+
+function prevezmi(kam) {
+  const cerstve = GH.mezipamet[kam]?.data;
+  if (!cerstve) return;
+  if (kam === SOUBOR_ZAKAZKY) S.zakazky = cerstve.zakazky.map(normalizuj);
+  else if (kam === SOUBOR_CENIK) S.cenik = cerstve;
+  else S.ukoly = cerstve.polozky || [];
+}
+
+async function ulozHned(zprava, kam, uprav) {
+  let ok = false;
   try {
     await GH.zmen(kam, uprav, zprava);
-    const cerstve = GH.mezipamet[kam].data;
-    if (kam === SOUBOR_ZAKAZKY) S.zakazky = cerstve.zakazky.map(normalizuj);
-    else if (kam === SOUBOR_CENIK) S.cenik = cerstve;
-    else S.ukoly = cerstve.polozky || [];
-    vykresli();
-    return true;
+    dotcene.add(kam);
+    ok = true;
   } catch (e) {
     /* Po neúspěchu zahodit ETag, jinak by další synchronizace dostala 304
        a aplikace by natrvalo zůstala u zastaralých dat. */
     delete GH.etag[kam];
     hlaska(e.message || 'Uložení se nepovedlo.', 'chyba');
-    return false;
   } finally {
+    /* Čekají-li za námi další zápisy, necháme na obrazovce okamžitý stav —
+       data ze serveru by ho na chvilku přepsala. Převezme je až poslední. */
+    if (UI.ukladam <= 1 && dotcene.size) {
+      dotcene.forEach(prevezmi);
+      dotcene.clear();
+      vykresli();
+    }
     UI.ukladam--;
     if (!UI.ukladam) $('#btn-obnovit').classList.remove('tocise');
   }
+  return ok;
 }
 
 /* Změna jedné zakázky podle id — funguje i po sloučení s cizí verzí. */
-const ulozZakazku = (zprava, id, fn) =>
-  uloz(zprava, SOUBOR_ZAKAZKY, (d) => { const z = d.zakazky.find((x) => x.id === id); if (z) fn(z); });
+const ulozZakazku = (zprava, id, fn) => {
+  const z = najdi(id);
+  const s = typeof zprava === 'string' ? { nadpis: zprava } : zprava;
+  return uloz(z ? { ...s, zakazka: s.zakazka || stitek(z), zakazkaId: z.id } : s, SOUBOR_ZAKAZKY,
+    (d) => { const x = d.zakazky.find((y) => y.id === id); if (x) fn(x); });
+};
 
 /* ---------------------------------------------------------- vykreslení */
 
@@ -430,8 +523,8 @@ function vyfiltrovane() {
   const h = UI.hledat.trim().toLowerCase();
   return S.zakazky
     .filter((z) => (UI.filtr === 'aktivni' ? z.stav === 'aktivni' : z.stav !== 'aktivni'))
-    .filter((z) => !h || [z.nazev, z.podnazev, z.kod, ...z.videa.map((v) => v.nazev),
-      ...Object.values(z.komentare).map((k) => k.text)].join(' ').toLowerCase().includes(h));
+    .filter((z) => !h || [z.nazev, z.podnazev, z.kod, z.adresa, ...z.prednosti, ...z.videa.map((v) => v.nazev),
+      ...z.napady.map((n) => n.text), ...Object.values(z.komentare).map((k) => k.text)].join(' ').toLowerCase().includes(h));
 }
 
 /* ---------------------------------------------------------- poznámky a úkoly */
@@ -481,17 +574,17 @@ function vykresliPlochu() {
   const plocha = $('#plocha');
 
   if (!seznam.length) {
-    plocha.innerHTML = `
+    prekresli(plocha, `
       <div class="prazdno">
         <h3>${UI.hledat ? 'Nic se nenašlo' : UI.filtr === 'aktivni' ? 'Žádná aktivní zakázka' : 'Hotových zakázek zatím není'}</h3>
         <p>${UI.hledat ? 'Hledáme v názvech, popisech, videích i komentářích.' : UI.filtr === 'aktivni' ? 'Založ zakázku a přidej k ní fotky, vizualizace a videa.' : 'Hotové zakázky se sem přesunou z aktivních.'}</p>
         ${!UI.hledat && UI.filtr === 'aktivni' ? '<button class="btn-nova" style="margin:0 auto" data-akce="nova"><svg class="icon"><use href="#i-plus"/></svg> Nová zakázka</button>' : ''}
-      </div>`;
+      </div>`);
     return;
   }
 
-  plocha.innerHTML = `<div class="mrizka">${seznam.map(karta).join('')}</div>`;
-  $$('[data-nahled]', plocha).forEach(dopnutiNahledu);
+  prekresli(plocha, `<div class="mrizka">${seznam.map(karta).join('')}</div>`);
+  $$('[data-nahled]:not([data-hotovo])', plocha).forEach(dopnutiNahledu);
 }
 
 const obalVidea = (z) => z.videa.find((v) => v.format === '16:9' && vimeoInfo(v.vimeo)) || z.videa.find((v) => vimeoInfo(v.vimeo));
@@ -503,7 +596,7 @@ function karta(z) {
   const vysoka = z.videa.filter((v) => v.format === '9:16').length;
 
   return `
-    <article class="karta" draggable="true" data-karta="${esc(z.id)}">
+    <article class="karta" id="karta-${esc(z.id)}" draggable="true" data-karta="${esc(z.id)}">
       ${info ? `
         <button class="karta-nahled" data-akce="otevri" data-id="${esc(z.id)}"
                 data-nahled="${esc(info.id)}" data-hash="${esc(info.hash || '')}"
@@ -512,8 +605,14 @@ function karta(z) {
       <div class="karta-telo">
         <button class="karta-nadpis" data-akce="otevri" data-id="${esc(z.id)}">
           <h3>${esc(z.nazev)}</h3>
-          ${z.podnazev ? `<p>${esc(z.podnazev)}</p>` : ''}
         </button>
+        ${z.adresa ? `<a class="karta-adresa" href="${esc(odkazMapy(z.adresa))}" target="_blank" rel="noopener" draggable="false" title="Otevřít v Mapy.cz"><svg class="icon"><use href="#i-pin"/></svg><span>${esc(z.adresa)}</span></a>` : ''}
+        ${z.podnazev ? `<button class="karta-popis" data-akce="otevri" data-id="${esc(z.id)}">${esc(z.podnazev)}</button>` : ''}
+        ${z.prednosti.length ? `
+          <div class="stitky">
+            ${z.prednosti.slice(0, 4).map((t) => `<button class="stitek" data-akce="filtr-stitek" data-stitek="${esc(t)}" title="Ukázat zakázky s „${esc(t)}“">${esc(t)}</button>`).join('')}
+            ${z.prednosti.length > 4 ? `<button class="stitek dalsi" data-akce="otevri" data-id="${esc(z.id)}">+${z.prednosti.length - 4}</button>` : ''}
+          </div>` : ''}
 
         <dl class="udaje">
           <div><dt>ID</dt><dd>${z.kod ? esc(z.kod) : '<i>nevyplněno</i>'}</dd></div>
@@ -531,6 +630,7 @@ function karta(z) {
           <span class="${vysoka ? 'ma' : ''}">${vysoka}× REELS</span>
           ${z.pudorysy.length ? `<span class="ma">${z.pudorysy.length}× PŮDORYS</span>` : ''}
           ${z.bannery.length ? `<span class="ma">${z.bannery.length}× BANNER</span>` : ''}
+          ${z.napady.length ? `<span class="ma">${z.napady.length}× NÁPAD</span>` : ''}
           <span class="karta-poradi">
             <span class="karta-uchyt" title="Přetáhni kartu a změň pořadí"><svg class="icon"><use href="#i-uchyt"/></svg></span>
             <button data-akce="posun" data-id="${esc(z.id)}" data-smer="-1" title="Posunout dopředu" aria-label="Posunout dopředu"><svg class="icon"><use href="#i-nahoru"/></svg></button>
@@ -546,6 +646,7 @@ const chipOdkaz = (ikona, popis, url, zid, klic) => url
   : `<button class="chip chybi" data-akce="odkaz" data-id="${esc(zid)}" data-klic="${klic}"><svg class="icon"><use href="#${ikona}"/></svg><span>${esc(popis)}</span></button>`;
 
 async function dopnutiNahledu(prvek) {
+  prvek.dataset.hotovo = '1';
   const { nahled: id, hash } = prvek.dataset;
   try {
     const url = await vimeoNahled({ id, hash, verejny: `https://vimeo.com/${id}${hash ? '/' + hash : ''}` });
@@ -580,24 +681,42 @@ async function presunZakazku(id, cilId) {
 
 /* ---------------------------------------------------------- detail */
 
+/* Překreslí obsah tak, že změní jen to, co se opravdu liší (morphdom).
+   Co má uživatel zrovna pod rukama, zůstane netknuté:
+   – pole s kurzorem (rozepsaný text, výběr, napůl zadané datum, klávesnice na mobilu),
+   – rozepsaná přednost, i když pole ztratilo fokus,
+   – hrající video (jinak by se pustilo znovu od začátku),
+   – dotažené náhledy videí a souborů (jinak by problikly). */
+function prekresli(kontejner, html) {
+  morphdom(kontejner, `<div>${html}</div>`, {
+    childrenOnly: true,
+    onBeforeElUpdated(stary, novy) {
+      const pole = /^(INPUT|TEXTAREA|SELECT)$/.test(stary.tagName);
+      if (pole && stary === document.activeElement) return false;
+      if (stary.id === 'nova-prednost') { stary.placeholder = novy.placeholder; return false; }
+      /* Přehrávač nechat, jen když je to přesně tatáž adresa (i s hashem skrytého videa). */
+      if (stary.tagName === 'IFRAME' && novy.tagName === 'IFRAME' && stary.getAttribute('src') === novy.getAttribute('src')) return false;
+      if (stary.dataset.hotovo && (
+        (stary.dataset.nahled && stary.dataset.nahled === novy.dataset.nahled && (stary.dataset.hash || '') === (novy.dataset.hash || '')) ||
+        (stary.dataset.soubor && stary.dataset.soubor === novy.dataset.soubor))) return false;
+      /* Žádná zkratka přes isEqualNode: vidí jen atributy, takže by blok s polem,
+         ve kterém je jiný text, prohlásila za stejný a pole by nikdy nesrovnala. */
+      return true;
+    },
+  });
+}
+
 function vykresliSuplik() {
   const suplik = $('#suplik');
-  const aktivni = document.activeElement;
-  if (suplik.contains(aktivni) && /INPUT|TEXTAREA/.test(aktivni.tagName)) return;
-
-  const posun = $('.suplik-telo', suplik)?.scrollTop || 0;
-
   if (UI.otevrena === CENIK) {
-    suplik.innerHTML = htmlCenik();
+    prekresli(suplik, htmlCenik());
   } else {
     const z = najdi(UI.otevrena);
     if (!z) return zavri();
-    suplik.innerHTML = htmlDetail(z);
-    $$('[data-nahled]', suplik).forEach(dopnutiNahledu);
-    $$('[data-soubor]', suplik).forEach(dopnutiSouboru);
+    prekresli(suplik, htmlDetail(z));
+    $$('[data-nahled]:not([data-hotovo])', suplik).forEach(dopnutiNahledu);
+    $$('[data-soubor]:not([data-hotovo])', suplik).forEach(dopnutiSouboru);
   }
-
-  if (posun) $('.suplik-telo', suplik).scrollTop = posun;
   $$('textarea', suplik).forEach(dorovnej);
 }
 
@@ -650,20 +769,65 @@ function htmlDetail(z) {
       <textarea class="vstup popis-vstup" data-pole="podnazev" rows="1" aria-label="Popis zakázky"
                 placeholder="Popis — dispozice, lokalita, co je potřeba…">${esc(z.podnazev || '')}</textarea>
       <div class="sh-datum">
+        <label for="p-adresa">Adresa</label>
+        <input class="vstup adresa-vstup" id="p-adresa" data-pole="adresa" value="${esc(z.adresa)}" placeholder="Ulice a číslo, obec" autocomplete="off">
+        ${z.adresa ? `<a class="mini" href="${esc(odkazMapy(z.adresa))}" target="_blank" rel="noopener"><svg class="icon"><use href="#i-pin"/></svg> Mapy</a>` : ''}
+      </div>
+      <div class="sh-datum">
         <label for="p-nataceno">Natáčeno</label>
         <input class="vstup datum-vstup" id="p-nataceno" type="date" data-pole="nataceno" value="${esc(z.nataceno || '')}">
       </div>
     </div>
 
     <div class="suplik-telo">
+      ${panelPrednosti(z)}
       ${panelOdkazu(z)}
       ${panelSouboru(z, 'pudorysy')}
+      ${panelNapadu(z)}
       ${panelVidei(z)}
       ${panelSouboru(z, 'bannery')}
       <div class="detail-pata">
         <button class="mini zrus" data-akce="smazat-zakazku"><svg class="icon"><use href="#i-kos"/></svg> Smazat zakázku</button>
       </div>
     </div>`;
+}
+
+/* ----- TOP přednosti ----- */
+
+function panelPrednosti(z) {
+  /* Návrhy = štítky z ostatních zakázek, ať se stejná přednost píše pokaždé stejně. */
+  const moje = new Set(z.prednosti.map((t) => t.toLowerCase()));
+  const navrhy = [...new Set(S.zakazky.flatMap((x) => x.prednosti))].filter((t) => !moje.has(t.toLowerCase())).sort((a, b) => a.localeCompare(b, 'cs'));
+  const plno = z.prednosti.length >= MAX_PREDNOSTI;
+  return panel({
+    ikona: 'i-hvezda', titulek: 'TOP přednosti', pocet: z.prednosti.length,
+    obsah: `
+      ${z.prednosti.length ? `<div class="stitky velke">${z.prednosti.map((t) => `
+        <span class="stitek">${esc(t)}<button data-akce="prednost-odebrat" data-stitek="${esc(t)}" title="Odebrat" aria-label="Odebrat ${esc(t)}"><svg class="icon"><use href="#i-krizek"/></svg></button></span>`).join('')}
+      </div>` : ''}
+      ${plno ? `<p class="prazdna-poznamka">Maximum je ${MAX_PREDNOSTI} — TOP má být to nejlepší.</p>` : `
+        <form class="prednost-novy" data-zakazka="${esc(z.id)}" autocomplete="off">
+          <input id="nova-prednost" list="prednosti-navrhy" maxlength="40" placeholder="${z.prednosti.length ? 'Další přednost…' : 'Např. Bazén, Les za plotem, Bez sousedů…'}" aria-label="Nová přednost">
+          <datalist id="prednosti-navrhy">${navrhy.map((t) => `<option value="${esc(t)}">`).join('')}</datalist>
+          <button type="submit" class="mini zlaty"><svg class="icon"><use href="#i-plus"/></svg> Přidat</button>
+        </form>`}`,
+  });
+}
+
+/* Štítek se ukáže hned, uložení doběhne na pozadí. Při chybě se data načtou znovu. */
+async function pridejPrednost(zid, text) {
+  const z = najdi(zid);
+  const novy = srovnejPrednosti([text])[0];
+  if (!z || !novy) return;
+  if (z.prednosti.some((t) => t.toLowerCase() === novy.toLowerCase())) return hlaska('Tahle přednost už u zakázky je.');
+  if (z.prednosti.length >= MAX_PREDNOSTI) return;
+  z.prednosti = [...z.prednosti, novy];
+  vykresliSuplik();
+  vykresliPlochu();
+  $('#nova-prednost')?.focus();
+  const ok = await ulozZakazku({ nadpis: `${stitek(z)} — TOP přednost: ${novy}` }, z.id,
+    (x) => { x.prednosti = srovnejPrednosti([...(x.prednosti || []), novy]); });
+  if (!ok) synchronizuj();
 }
 
 /* ----- odkazy ----- */
@@ -729,7 +893,7 @@ function panelSouboru(z, sekce) {
 function dlazdiceSouboru(z, f, sekce) {
   const obrazek = (f.typ || '').startsWith('image/');
   return `
-    <div class="soubor polozka">
+    <div class="soubor polozka" id="soubor-${esc(f.id)}">
       <a class="soubor-nahled nacita" target="_blank" rel="noopener" draggable="false"
          data-soubor="${esc(f.cesta)}" data-typ="${esc(f.typ || '')}" title="${esc(f.nazev)}">
         ${obrazek ? '' : `<span class="soubor-typ">${esc(pripona(f.nazev).toUpperCase())}</span>`}
@@ -742,6 +906,46 @@ function dlazdiceSouboru(z, f, sekce) {
         </button>
       </div>
       ${komentarPolozky(z, f.id)}
+    </div>`;
+}
+
+/* ----- nápady na scénář ----- */
+
+function panelNapadu(z) {
+  return panel({
+    ikona: 'i-napad', titulek: 'Nápady na scénář', pocet: z.napady.length,
+    obsah: `<div class="napady">${Object.entries(DRUHY_NAPADU).map(([druh, d]) => skupinaNapadu(z, druh, d)).join('')}</div>`,
+  });
+}
+
+function skupinaNapadu(z, druh, d) {
+  const napady = z.napady.filter((n) => n.druh === druh);
+  return `
+    <div class="napady-skupina ${d.barva}">
+      <div class="ns-hlava">
+        <span class="ns-nazev">${esc(d.nazev)}</span>
+        <span class="ns-format">${d.format}</span>
+        ${napady.length ? `<span class="ns-pocet">${napady.length}</span>` : ''}
+        <span class="rozpera"></span>
+        <button class="pridat" data-akce="napad-pridat" data-druh="${druh}"><svg class="icon"><use href="#i-plus"/></svg> Nápad</button>
+      </div>
+      ${napady.map((n) => napadHtml(z, n)).join('')}
+    </div>`;
+}
+
+function napadHtml(z, n) {
+  return `
+    <div class="napad polozka" id="napad-${esc(n.id)}">
+      <div class="napad-radek">
+        <p class="napad-text">${esc(n.text)}</p>
+        <div class="napad-akce">
+          <button class="ikonmini" data-akce="napad-upravit" data-nid="${esc(n.id)}" title="Upravit nápad" aria-label="Upravit nápad"><svg class="icon"><use href="#i-tuzka"/></svg></button>
+          ${tlacitkoKomentare(z, n.id)}
+          <button class="ikonmini zrus" data-akce="napad-smazat" data-nid="${esc(n.id)}" title="Smazat nápad" aria-label="Smazat nápad"><svg class="icon"><use href="#i-kos"/></svg></button>
+        </div>
+      </div>
+      ${n.kdo ? `<span class="napad-kdo">${esc(n.kdo)}${n.kdy ? ' · ' + esc(kdyKratce(n.kdy)) : ''}</span>` : ''}
+      ${komentarPolozky(z, n.id)}
     </div>`;
 }
 
@@ -765,11 +969,11 @@ function panelVidei(z) {
 function videoKarta(z, v) {
   const info = vimeoInfo(v.vimeo);
   return `
-    <div class="video-karta polozka ${v.format === '9:16' ? 'w916' : 'w169'}">
+    <div class="video-karta polozka ${v.format === '9:16' ? 'w916' : 'w169'}" id="video-${esc(v.id)}">
       ${info
         ? `<div class="vk-ramecek">
              ${UI.hraje.has(v.id)
-               ? `<iframe src="${esc(info.embed)}" allow="fullscreen; picture-in-picture" allowfullscreen title="${esc(v.nazev)}"></iframe>`
+               ? `<iframe src="${esc(info.embed)}&autoplay=1" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen title="${esc(v.nazev)}"></iframe>`
                : `<button class="vk-prehrat" data-akce="prehrat" data-vid="${esc(v.id)}" data-nahled="${esc(info.id)}" data-hash="${esc(info.hash || '')}" aria-label="Přehrát ${esc(v.nazev)}">
                     <span class="kolecko"><svg class="icon"><use href="#i-prehrat"/></svg></span>
                   </button>`}
@@ -800,6 +1004,11 @@ function nazevPolozky(z, klic) {
   if (v) return `Video — ${v.nazev}`;
   const f = [...z.pudorysy, ...z.bannery].find((x) => x.id === klic);
   if (f) return f.nazev;
+  const n = z.napady.find((x) => x.id === klic);
+  if (n) {
+    const zacatek = n.text.replace(/\s+/g, ' ').trim();
+    return `Nápad (${DRUHY_NAPADU[n.druh].nazev}) „${zacatek.length > 50 ? zacatek.slice(0, 50) + '…' : zacatek}“`;
+  }
   return z.odkazy.find((x) => x.id === klic)?.nazev || '';
 }
 
@@ -876,6 +1085,7 @@ function otevriCenik() {
 function zavri() {
   UI.otevrena = null;
   UI.hraje.clear();
+  $$('#suplik iframe').forEach((f) => f.remove());  /* jinak by video hrálo dál se zvukem */
   $('#suplik').classList.remove('otevreno');
   $('#suplik').setAttribute('aria-hidden', 'true');
   $('#zaves').classList.remove('otevreno');
@@ -944,7 +1154,7 @@ function dialog({ titulek, popis, pole = [], okText = 'Uložit', nebezpeci = fal
   });
 }
 
-const potvrd = async (o) => (await dialog({ ...o, pole: [], nebezpeci: true })) !== null;
+const potvrd = async (o) => (await dialog({ nebezpeci: true, ...o, pole: [] })) !== null;
 
 /* ---------------------------------------------------------- akce */
 
@@ -1019,7 +1229,7 @@ async function akce(jmeno, prvek) {
     const hotovo = !u.hotovo;
     u.hotovo = hotovo;  /* hned vidět, uložení doběhne na pozadí */
     vykresliUkoly();
-    const ok = await uloz(hotovo ? 'Úkol hotový' : 'Úkol znovu otevřený', SOUBOR_UKOLY, (dd) => {
+    const ok = await uloz({ nadpis: hotovo ? 'Úkol hotový' : 'Úkol znovu otevřený', detail: u.text }, SOUBOR_UKOLY, (dd) => {
       const cil = (dd.polozky || []).find((x) => x.id === u.id);
       if (cil) cil.hotovo = hotovo;
     });
@@ -1043,15 +1253,23 @@ async function akce(jmeno, prvek) {
     if (!v) return;
     if (v.navic) {
       if (!await potvrd({ titulek: 'Smazat poznámku?', popis: `„${u.text.slice(0, 80)}" zmizí.`, okText: 'Smazat' })) return;
-      return uloz('Smazaná poznámka', SOUBOR_UKOLY, (dd) => { dd.polozky = (dd.polozky || []).filter((x) => x.id !== u.id); });
+      return uloz({ nadpis: 'Smazaná poznámka', detail: u.text }, SOUBOR_UKOLY, (dd) => { dd.polozky = (dd.polozky || []).filter((x) => x.id !== u.id); });
     }
     if (!v.text) return;
-    return uloz('Upravená poznámka', SOUBOR_UKOLY, (dd) => {
+    return uloz({ nadpis: 'Upravená poznámka', detail: v.text }, SOUBOR_UKOLY, (dd) => {
       const cil = (dd.polozky || []).find((x) => x.id === u.id);
       if (!cil) throw new Error('Tuhle poznámku už mezitím někdo smazal.');
       cil.text = v.text;
       cil.zakazka = v.zakazka || '';
     });
+  }
+
+  /* Klik na štítek na kartě ukáže všechny zakázky se stejnou předností. */
+  if (jmeno === 'filtr-stitek') {
+    UI.hledat = d.stitek;
+    $('#hledat').value = d.stitek;
+    vykresliPlochu();
+    return window.scrollTo({ top: $('.ovladani').offsetTop - 70, behavior: 'smooth' });
   }
 
   /* ----- pořadí zakázek ----- */
@@ -1070,11 +1288,14 @@ async function akce(jmeno, prvek) {
 
   if (jmeno === 'prehodit') {
     const hotove = z.stav === 'aktivni';
-    if (!await ulozZakazku(`${stitek(z)} — ${hotove ? 'hotové' : 'zpět mezi aktivní'}`, z.id, (x) => { x.stav = hotove ? 'hotove' : 'aktivni'; })) return;
-    UI.filtr = hotove ? 'hotove' : 'aktivni';
+    const novyStav = hotove ? 'hotove' : 'aktivni';
+    z.stav = novyStav;
+    UI.filtr = novyStav;
     localStorage.setItem('kokpit.filtr', UI.filtr);
     vykresli();
-    return hlaska(hotove ? 'Přesunuto mezi hotové.' : 'Zpátky mezi aktivními.', 'uspech');
+    hlaska(hotove ? 'Přesunuto mezi hotové.' : 'Zpátky mezi aktivními.', 'uspech');
+    if (!await ulozZakazku(`${stitek(z)} — ${hotove ? 'hotové' : 'zpět mezi aktivní'}`, z.id, (x) => { x.stav = novyStav; })) synchronizuj();
+    return;
   }
 
   if (jmeno === 'komentar') {
@@ -1090,7 +1311,7 @@ async function akce(jmeno, prvek) {
     if (!v) return;
     const text = v.navic ? '' : (v.text || '').trim();
     if (text === stary) return;
-    return ulozZakazku(`${stitek(z)} — komentář: ${nazevPolozky(z, klic)}`, z.id, (x) => {
+    return ulozZakazku({ nadpis: `${stitek(z)} — ${text ? 'komentář' : 'smazán komentář'}: ${nazevPolozky(z, klic)}`, detail: text }, z.id, (x) => {
       x.komentare = x.komentare || {};
       if (text) x.komentare[klic] = { text, kdo: JA.jmeno, kdy: nyni() };
       else delete x.komentare[klic];
@@ -1098,6 +1319,55 @@ async function akce(jmeno, prvek) {
       const vid = (x.videa || []).find((y) => y.id === klic);
       if (vid) { delete vid.popis; delete vid.poznamka; }
     });
+  }
+
+  if (jmeno === 'napad-pridat' || jmeno === 'napad-upravit') {
+    const n = jmeno === 'napad-upravit' ? z.napady.find((x) => x.id === d.nid) : null;
+    if (jmeno === 'napad-upravit' && !n) return;
+    const v = await dialog({
+      titulek: n ? 'Upravit nápad' : 'Nový nápad na scénář',
+      pole: [
+        { klic: 'druh', label: 'Pro video', typ: 'prepinac', hodnota: n?.druh || d.druh || 'sreality',
+          volby: Object.entries(DRUHY_NAPADU).map(([id, x]) => ({ id, nazev: x.nazev })) },
+        { klic: 'text', label: 'Nápad', typ: 'textarea', hodnota: n?.text || '', placeholder: 'Hook, děj, klíčový záběr, pointa…' },
+      ],
+      okText: n ? 'Uložit' : 'Přidat',
+    });
+    if (!v?.text) return;
+    const druh = DRUHY_NAPADU[v.druh] ? v.druh : 'sreality';
+    if (n && v.text === n.text && druh === n.druh) return;
+    return n
+      ? ulozZakazku({ nadpis: `${stitek(z)} — upraven nápad: ${DRUHY_NAPADU[druh].nazev}`, detail: v.text }, z.id, (x) => {
+          const cil = (x.napady || []).find((y) => y.id === n.id);
+          if (!cil) throw new Error('Tenhle nápad už mezitím někdo smazal.');
+          cil.text = v.text;
+          cil.druh = druh;
+        })
+      : ulozZakazku({ nadpis: `${stitek(z)} — nový nápad: ${DRUHY_NAPADU[druh].nazev}`, detail: v.text }, z.id, (x) => {
+          (x.napady = x.napady || []).push({ id: uid('n'), druh, text: v.text, kdo: JA.jmeno, kdy: nyni() });
+        });
+  }
+
+  if (jmeno === 'napad-smazat') {
+    const n = z.napady.find((x) => x.id === d.nid);
+    if (!n) return;
+    const ukazka = n.text.length > 80 ? n.text.slice(0, 80) + '…' : n.text;
+    if (!await potvrd({ titulek: 'Smazat nápad?', popis: `„${ukazka}" zmizí i s komentářem.`, okText: 'Smazat' })) return;
+    return ulozZakazku({ nadpis: `${stitek(z)} — smazán nápad: ${DRUHY_NAPADU[n.druh].nazev}`, detail: n.text }, z.id, (x) => {
+      x.napady = (x.napady || []).filter((y) => y.id !== n.id);
+      if (x.komentare) delete x.komentare[n.id];
+    });
+  }
+
+  if (jmeno === 'prednost-odebrat') {
+    const text = d.stitek;
+    z.prednosti = z.prednosti.filter((t) => t !== text);
+    vykresliSuplik();
+    vykresliPlochu();
+    const ok = await ulozZakazku({ nadpis: `${stitek(z)} — odebrána přednost: ${text}` }, z.id,
+      (x) => { x.prednosti = (x.prednosti || []).filter((t) => t.toLowerCase() !== text.toLowerCase()); });
+    if (!ok) synchronizuj();
+    return;
   }
 
   if (jmeno === 'rozbalit') {
@@ -1121,7 +1391,8 @@ async function akce(jmeno, prvek) {
         prubeh.text(`Nahrávám ${i + 1} z ${soubory.length} — ${f.name}`);
         const id = uid('s');
         const cesta = `soubory/${z.id}/${id}.${pripona(f.name)}`;
-        await nahrajDoRepa(cesta, await souborNaB64(f), `${stitek(z)} — ${SEKCE[sekce].jednotne}: ${f.name}`);
+        const obsah = await souborNaB64(f);
+        await sOpakovanim(() => nahrajDoRepa(cesta, obsah, `${stitek(z)} — ${SEKCE[sekce].jednotne}: ${f.name}`));
         nahrane.push({ id, nazev: f.name, cesta, typ: f.type || '' });
       }
       prubeh.text('Ukládám…');
@@ -1133,7 +1404,7 @@ async function akce(jmeno, prvek) {
       hlaska(nahrane.length === 1 ? 'Nahráno.' : `Nahráno ${nahrane.length} souborů.`, 'uspech');
     } catch (e) {
       /* Ať v repu nezůstanou soubory, které k žádné zakázce nepatří. */
-      for (const n of nahrane) { try { await smazZRepa(n.cesta, 'Úklid nedokončeného nahrávání'); } catch {} }
+      for (const n of nahrane) { try { await sOpakovanim(() => smazZRepa(n.cesta, 'Úklid nedokončeného nahrávání')); } catch {} }
       hlaska(e.message || 'Nahrání se nepovedlo.', 'chyba');
     } finally {
       prubeh.pryc();
@@ -1152,7 +1423,7 @@ async function akce(jmeno, prvek) {
     })) return;
     const url = blobUrl.get(f.cesta);
     if (url) { URL.revokeObjectURL(url); blobUrl.delete(f.cesta); }
-    try { await smazZRepa(f.cesta, `Smazán soubor ${f.nazev}`); } catch { /* záznam je pryč, zbytek nevadí */ }
+    try { await sOpakovanim(() => smazZRepa(f.cesta, `Smazán soubor ${f.nazev}`)); } catch { /* záznam je pryč, zbytek nevadí */ }
     return;
   }
 
@@ -1216,10 +1487,10 @@ async function akce(jmeno, prvek) {
   if (jmeno === 'prehrat') {
     const info = vimeoInfo(z.videa.find((x) => x.id === d.vid)?.vimeo);
     if (!info) return;
-    UI.hraje.add(d.vid);  /* ať přehrávač přežije překreslení šuplíku */
-    prvek.closest('.vk-ramecek').innerHTML =
-      `<iframe src="${esc(info.embed)}&autoplay=1" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen title="video"></iframe>`;
-    return;
+    /* Přehrávač vykreslí šablona — jen tak má stejnou podobu jako při každém
+       dalším překreslení a morphdom ho nechá hrát. */
+    UI.hraje.add(d.vid);
+    return vykresliSuplik();
   }
 
   if (jmeno === 'smazat-zakazku') {
@@ -1228,7 +1499,8 @@ async function akce(jmeno, prvek) {
       popis: `„${z.nazev}" zmizí i s videi, soubory a komentáři. Zůstane v historii na GitHubu, odkud ji Franta umí vrátit.`,
       okText: 'Smazat',
     })) return;
-    const ok = await uloz(`Smazána zakázka ${stitek(z)}`, SOUBOR_ZAKAZKY, (dd) => { dd.zakazky = dd.zakazky.filter((x) => x.id !== z.id); });
+    const ok = await uloz({ nadpis: `${stitek(z)} — smazána zakázka`, zakazka: stitek(z), zakazkaId: z.id }, SOUBOR_ZAKAZKY,
+      (dd) => { dd.zakazky = dd.zakazky.filter((x) => x.id !== z.id); });
     if (ok) { zavri(); hlaska('Zakázka smazána.', 'uspech'); }
   }
 }
@@ -1239,6 +1511,7 @@ async function novaZakazka() {
     pole: [
       { klic: 'nazev', label: 'Název', hodnota: '', placeholder: 'Např. Vinohrady — Bělehradská' },
       { klic: 'podnazev', label: 'Popis', hodnota: '', placeholder: 'Např. Byt 3+kk · 92 m² · Praha 2' },
+      { klic: 'adresa', label: 'Adresa', hodnota: '', placeholder: 'Ulice a číslo, obec' },
       { klic: 'nataceno', label: 'Natáčeno', typ: 'date', hodnota: '' },
       {
         klic: 'kod', label: 'ID zakázky', hodnota: '', placeholder: 'Nechat prázdné',
@@ -1254,6 +1527,8 @@ async function novaZakazka() {
     kod: v.kod,
     nazev: v.nazev,
     podnazev: v.podnazev,
+    adresa: v.adresa,
+    prednosti: [],
     nataceno: v.nataceno,
     stav: 'aktivni',
     fotky: '',
@@ -1262,27 +1537,73 @@ async function novaZakazka() {
     prohlidka3d: '',
     pudorysy: [],
     bannery: [],
+    napady: [],
     videa: [],
     komentare: {},
     vytvoreno: nyni(),
   };
   UI.filtr = 'aktivni';
   localStorage.setItem('kokpit.filtr', UI.filtr);
-  if (await uloz(`Nová zakázka ${stitek(nova)}`, SOUBOR_ZAKAZKY, (d) => { d.zakazky.unshift(nova); })) otevri(nova.id);
+  const zprava = { nadpis: `${stitek(nova)} — nová zakázka`, detail: nova.podnazev, zakazka: stitek(nova), zakazkaId: nova.id };
+  /* Hned na nástěnku i do detailu — uložení doběhne na pozadí. */
+  S.zakazky = [normalizuj(structuredClone(nova)), ...S.zakazky];
+  vykresli();
+  otevri(nova.id);
+  if (!await uloz(zprava, SOUBOR_ZAKAZKY, (d) => { d.zakazky.unshift(nova); })) synchronizuj();
 }
 
+/* Jedno pole se ukládá jen jednou naráz — u data přijde change i focusout. */
+const ukladanaPole = new WeakSet();
+
 async function ulozPole(prvek) {
+  if (ukladanaPole.has(prvek)) return;
+  ukladanaPole.add(prvek);
+  try { await ulozPoleHned(prvek); } finally { ukladanaPole.delete(prvek); }
+}
+
+async function ulozPoleHned(prvek) {
   const z = najdi(UI.otevrena);
   if (!z) return;
   const klic = prvek.dataset.pole;
-  if (String(z[klic] ?? '') === prvek.value) return;
-  const nazvy = { nazev: 'název', podnazev: 'popis', kod: 'ID zakázky', nataceno: 'datum natáčení' };
-  if (await ulozZakazku(`${stitek(z)} — ${nazvy[klic] || klic}`, z.id, (x) => {
-    x[klic] = prvek.value;
-    if (klic === 'podnazev') x.poznamka = '';  /* stará poznámka už je v popisu */
-  })) {
-    hlaska('Uloženo.', 'uspech');
+  const nova = ['nazev', 'kod', 'adresa'].includes(klic) ? prvek.value.trim()
+    : klic === 'podnazev' ? prvek.value.replace(/\s+$/, '') : prvek.value;
+  if (klic === 'nazev' && !nova) { prvek.value = z.nazev; return; }  /* zakázka bez názvu by na nástěnce zmizela */
+  if (klic === 'nataceno' && nova && !/^(19|20)\d\d-\d\d-\d\d$/.test(nova)) {
+    hlaska('Tohle datum nevypadá správně, neuložil jsem ho.', 'chyba');
+    prvek.value = z.nataceno || '';
+    return;
   }
+  if (String(z[klic] ?? '') === nova) { prvek.value = nova; return; }
+
+  /* Druhá strana pole mezitím změnila — nepřepisovat to naslepo. */
+  const vychozi = vychoziHodnota.get(prvek);
+  vychoziHodnota.delete(prvek);
+  const aktualni = String(z[klic] ?? '');
+  if (vychozi !== undefined && aktualni !== vychozi) {
+    const ukazka = aktualni.length > 140 ? aktualni.slice(0, 140) + '…' : aktualni;
+    const prepsat = await potvrd({
+      titulek: 'Mezitím to změnil někdo jiný',
+      popis: `Teď je tam: „${ukazka || '(prázdné)'}“. Uložit místo toho tvoji verzi?`,
+      okText: 'Uložit moji', nebezpeci: false,
+    });
+    if (!prepsat) { vykresliSuplik(); return; }
+  }
+  const nazvy = { nazev: 'název', podnazev: 'popis', kod: 'ID zakázky', nataceno: 'datum natáčení', adresa: 'adresa' };
+  /* V souhrnu je vidět i nová hodnota, ne jen „změnil název“. Štítek se vezme
+     před změnou, ať nadpis i řádek „Zakázka:“ mluví o téže zakázce. */
+  const hodnota = klic === 'nataceno' ? denCesky(nova) : nova;
+  const puvodni = stitek(z);
+  /* Na obrazovce hned — za zápisem můžou ve frontě čekat další a do té doby
+     by se jinak ukazovala stará hodnota. */
+  z[klic] = nova;
+  if (klic === 'podnazev') z.poznamka = '';
+  vykresli();
+  const ok = await ulozZakazku({ nadpis: `${puvodni} — ${nazvy[klic] || klic}`, detail: hodnota, zakazka: puvodni }, z.id, (x) => {
+    x[klic] = nova;
+    if (klic === 'podnazev') x.poznamka = '';  /* stará poznámka už je v popisu */
+  });
+  if (ok) hlaska('Uloženo.', 'uspech');
+  else synchronizuj();
 }
 
 /* ---------------------------------------------------------- načtení */
@@ -1404,8 +1725,30 @@ document.addEventListener('click', (e) => {
   if (e.target.closest('#zaves')) zavri();
 });
 
+/* Hodnota pole ve chvíli, kdy do něj člověk vstoupil — podle ní se pozná,
+   že ho mezitím změnila druhá strana. */
+const vychoziHodnota = new WeakMap();
+
+document.addEventListener('focusin', (e) => {
+  const pole = e.target.closest?.('#suplik [data-pole]');
+  const z = pole && najdi(UI.otevrena);
+  if (z) vychoziHodnota.set(pole, String(z[pole.dataset.pole] ?? ''));
+});
+
+/* Po opuštění pole: datum se uloží až teď (při psaní z klávesnice by každá
+   rozepsaná podoba roku byla commit) a pole dostane aktuální hodnotu — mohla
+   se změnit, zatímco v něm byl kurzor a překreslování ho vynechávalo. */
+document.addEventListener('focusout', (e) => {
+  if (!e.target.matches?.('#suplik [data-pole], #suplik [data-cenik-pole]')) return;
+  if (e.target.type === 'date') ulozPole(e.target);
+  setTimeout(() => { if (UI.otevrena && !$('#dlg').open) vykresliSuplik(); }, 0);
+});
+
 document.addEventListener('change', (e) => {
-  if (e.target.matches('[data-pole]')) return ulozPole(e.target);
+  if (e.target.matches('[data-pole]')) {
+    if (e.target.type === 'date' && document.activeElement === e.target) return;  /* uloží focusout */
+    return ulozPole(e.target);
+  }
   if (e.target.matches('[data-cenik-pole]')) {
     const klic = e.target.dataset.cenikPole;
     const nova = e.target.value;
@@ -1445,6 +1788,16 @@ $('.zalozky').addEventListener('click', (e) => {
   vykresli();
 });
 
+document.addEventListener('submit', (e) => {
+  const form = e.target.closest?.('.prednost-novy');
+  if (!form) return;
+  e.preventDefault();
+  const vstup = $('#nova-prednost', form);
+  const text = vstup.value;
+  vstup.value = '';
+  pridejPrednost(form.dataset.zakazka, text);
+});
+
 /* Nová poznámka — Enter nebo tlačítko, ukáže se hned a uloží na pozadí. */
 $('#ukol-form').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -1458,7 +1811,9 @@ $('#ukol-form').addEventListener('submit', async (e) => {
   vstup.value = '';
   S.ukoly = [...S.ukoly, polozka];
   vykresliUkoly();
-  const ok = await uloz('Nová poznámka', SOUBOR_UKOLY, (dd) => { (dd.polozky = dd.polozky || []).push(polozka); });
+  const k = polozka.zakazka && najdi(polozka.zakazka);
+  const ok = await uloz({ nadpis: k ? `Nová poznámka k ${k.nazev}` : 'Nová poznámka', detail: text }, SOUBOR_UKOLY,
+    (dd) => { (dd.polozky = dd.polozky || []).push(polozka); });
   if (!ok) { vstup.value = text; synchronizuj(); }
 });
 
