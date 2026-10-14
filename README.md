@@ -8,14 +8,20 @@ v privátním repu `frantisekdron/chundela-data`.
 
 ## Co v tom je
 
+Nahoře je **Poznámky a úkoly** — společný seznam toho, co je potřeba
+vyřešit. Každá položka jde odškrtnout a volitelně navázat na zakázku.
+
+Pod tím jsou **zakázky** v pořadí, jaké si kdo přetáhne (na mobilu šipkami).
 Zakázka je **aktivní** nebo **hotová** a nese:
 
+- **popis** nahoře (víc řádků),
 - **odkazy** — fotky, vizualizace, 3D prohlídka a libovolné další,
-- **půdorysy** a **reklamní bannery** — nahrané soubory s náhledem,
-- **videa** — každé označené 16:9 pro Sreality nebo 9:16 pro reels, přehrají se přímo na stránce,
-- **poznámku** a **komentáře** obou stran.
+- **půdorysy** — nahrané soubory s náhledem,
+- **videa** — 16:9 pro Sreality přes celou šířku, 9:16 reels vždy vedle sebe,
+- **bannery** — nahrané soubory; první čtyři vidět, zbytek sbalený.
 
-Obě strany můžou cokoliv přidat, upravit i smazat.
+Ke **každé položce** jde napsat komentář (bublina vedle ní). Obě strany
+můžou cokoliv přidat, upravit i smazat.
 
 Půdorysy a bannery (obrázky i PDF) se nahrávají přímo do privátního repa
 do složky `soubory/`, takže nikde nevisí veřejně — kokpit si je stahuje
