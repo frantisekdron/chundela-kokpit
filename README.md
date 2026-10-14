@@ -15,7 +15,13 @@ Zakázka je **aktivní** nebo **hotová** a nese čtyři věci:
 - **poznámku**,
 - **komentáře** obou stran.
 
-Obě strany můžou zakázku i video přidat, upravit i smazat.
+U zakázky jsou odkazy na fotky, vizualizace a 3D prohlídku, nahrané
+půdorysy a reklamní bannery, videa z Vimea a komentáře. Obě strany
+můžou cokoliv přidat, upravit i smazat.
+
+Půdorysy a bannery se nahrávají přímo do privátního repa (`soubory/`),
+takže nikde nevisí veřejně — kokpit si je stahuje přístupovým klíčem.
+Na soubor platí limit 10 MB.
 
 Nahoře vpravo je **ceník** — sazby za natáčení, fotky, reels, dotáčení
 a příplatky plus dodací podmínky. Řádky se dají klikem upravit, přidat

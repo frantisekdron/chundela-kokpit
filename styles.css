@@ -204,7 +204,9 @@ main { width: var(--w); margin: 0 auto; padding-bottom: 90px; }
 .udaje dd { margin: 0; color: var(--gold); letter-spacing: 0.04em; }
 .udaje dd i { color: var(--muted-2); font-style: normal; }
 
-.karta-odkazy { display: flex; gap: 7px; }
+.karta-odkazy { display: flex; flex-wrap: wrap; gap: 7px; }
+/* Na kartě se chipy přizpůsobí obsahu a radši se zalomí, než aby ořízly text. */
+.karta-odkazy .chip { flex: 0 1 auto; }
 
 /* Poslední poznámky rovnou na kartě. */
 .karta-poznamky {
@@ -234,7 +236,7 @@ main { width: var(--w); margin: 0 auto; padding-bottom: 90px; }
 .chip.chybi .icon { color: var(--muted-2); }
 
 .karta-pata {
-  display: flex; align-items: center; gap: 12px; margin-top: auto; padding-top: 12px;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; margin-top: auto; padding-top: 12px;
   border-top: 1px solid var(--line);
   font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.06em; color: var(--muted-2);
 }
@@ -497,4 +499,86 @@ dialog::backdrop { background: rgba(10, 9, 7, 0.65); backdrop-filter: blur(3px);
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
   }
+}
+
+/* ============================================================
+   NAHRANÉ SOUBORY — půdorysy a bannery
+   ============================================================ */
+
+.soubory {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(124px, 1fr));
+  gap: 12px;
+}
+
+.soubor { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+
+.soubor-nahled {
+  position: relative;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 4 / 3;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--ink-2);
+  overflow: hidden;
+  transition: border-color 0.15s var(--ease);
+}
+
+.soubor-nahled:hover { border-color: var(--gold-dim); }
+.soubor-nahled img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+.soubor-nahled.nacita::after {
+  content: "";
+  width: 17px; height: 17px;
+  border: 2px solid var(--line-hi);
+  border-top-color: var(--gold);
+  border-radius: 50%;
+  animation: tocit 0.8s linear infinite;
+}
+
+.soubor-nahled.nedostupny::after {
+  content: "nedostupné";
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--rust);
+}
+
+.soubor-typ {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  color: var(--gold-dim);
+}
+
+.soubor-pata { display: flex; align-items: center; gap: 5px; min-width: 0; }
+
+.soubor-nazev {
+  flex: 1; min-width: 0;
+  font-size: 11.5px; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.soubor-smazat {
+  flex: none; padding: 3px; border-radius: var(--r-sm);
+  color: var(--muted-2); font-size: 13px; opacity: 0;
+  transition: opacity 0.15s var(--ease), color 0.15s var(--ease);
+}
+
+.soubor:hover .soubor-smazat, .soubor-smazat:focus-visible { opacity: 1; }
+.soubor-smazat:hover { color: var(--rust); }
+
+/* točítko v hlášce o průběhu nahrávání */
+.tocitko {
+  width: 14px; height: 14px; flex: none;
+  border: 2px solid var(--line-hi);
+  border-top-color: var(--gold);
+  border-radius: 50%;
+  animation: tocit 0.8s linear infinite;
+}
+
+@media (max-width: 900px) {
+  .soubory { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); }
+  .soubor-smazat { opacity: 1; }
 }

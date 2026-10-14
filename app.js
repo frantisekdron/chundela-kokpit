@@ -253,6 +253,9 @@ function normalizuj(z) {
     delete z.dalsiOdkazy;
   }
   z.odkazy = z.odkazy || [];
+  z.prohlidka3d = z.prohlidka3d || '';
+  z.pudorysy = z.pudorysy || [];
+  z.bannery = z.bannery || [];
   z.nataceno = z.nataceno ?? z.terminNataceni ?? '';
   delete z.terminNataceni;
   z.videa = (z.videa || []).map((v) => ({
@@ -260,6 +263,91 @@ function normalizuj(z) {
     vimeo: v.vimeo || '', popis: v.popis ?? v.poznamka ?? '',
   }));
   return z;
+}
+
+/* ---------------------------------------------------------- soubory
+
+   Půdorysy a bannery se nahrávají přímo do privátního repa vedle dat.
+   Repo je soukromé, takže se soubor nedá otevřít odkazem — stáhneme ho
+   klíčem a uděláme z něj blob URL, na které už obyčejný odkaz funguje. */
+
+const SEKCE = {
+  pudorysy: { popis: 'Půdorysy', jednotne: 'půdorys' },
+  bannery: { popis: 'Bannery', jednotne: 'banner' },
+};
+
+const MAX_SOUBOR = 10 * 1024 * 1024;
+const blobUrl = new Map();
+
+function vyberSoubory() {
+  return new Promise((hotovo) => {
+    const vstup = document.createElement('input');
+    vstup.type = 'file';
+    vstup.multiple = true;
+    vstup.accept = 'image/*,application/pdf';
+    vstup.onchange = () => hotovo([...vstup.files]);
+    vstup.oncancel = () => hotovo([]);
+    vstup.click();
+  });
+}
+
+const souborNaB64 = (soubor) => new Promise((hotovo, chyba) => {
+  const ctecka = new FileReader();
+  ctecka.onload = () => hotovo(String(ctecka.result).split(',')[1]);
+  ctecka.onerror = () => chyba(new Error('Soubor se nepodařilo přečíst.'));
+  ctecka.readAsDataURL(soubor);
+});
+
+const pripona = (jmeno) => (jmeno.match(/\.([a-zA-Z0-9]{1,8})$/)?.[1] || 'bin').toLowerCase();
+
+/* Stáhne soubor z repa a vrátí adresu, kterou umí otevřít prohlížeč. */
+async function souborUrl(cesta) {
+  if (blobUrl.has(cesta)) return blobUrl.get(cesta);
+  const r = await GH.volej(`${GH.cesta(cesta)}?ref=${CFG.branch}`, { headers: { Accept: 'application/vnd.github.raw' } });
+  if (!r.ok) throw await GH.selhalo(r);
+  const url = URL.createObjectURL(await r.blob());
+  blobUrl.set(cesta, url);
+  return url;
+}
+
+async function nahrajDoRepa(cesta, obsahB64, zprava) {
+  const r = await GH.volej(GH.cesta(cesta), {
+    method: 'PUT',
+    body: JSON.stringify({ message: zprava, content: obsahB64, branch: CFG.branch }),
+  });
+  if (!r.ok) throw await GH.selhalo(r);
+}
+
+async function smazZRepa(cesta, zprava) {
+  const meta = await GH.volej(`${GH.cesta(cesta)}?ref=${CFG.branch}`);
+  if (meta.status === 404) return;
+  if (!meta.ok) throw await GH.selhalo(meta);
+  const { sha } = await meta.json();
+  const r = await GH.volej(GH.cesta(cesta), {
+    method: 'DELETE',
+    body: JSON.stringify({ message: zprava, sha, branch: CFG.branch }),
+  });
+  if (!r.ok) throw await GH.selhalo(r);
+}
+
+/* Doplní náhledy a odkazy do dlaždic, které jsou právě na obrazovce. */
+async function dopnutiSouboru(prvek) {
+  const { soubor: cesta, typ } = prvek.dataset;
+  try {
+    const url = await souborUrl(cesta);
+    prvek.href = url;
+    prvek.classList.remove('nacita');
+    if (typ.startsWith('image/')) {
+      const img = new Image();
+      img.src = url;
+      img.alt = '';
+      img.loading = 'lazy';
+      prvek.prepend(img);
+    }
+  } catch {
+    prvek.classList.remove('nacita');
+    prvek.classList.add('nedostupny');
+  }
 }
 
 /* ---------------------------------------------------------- hlášky */
@@ -270,6 +358,19 @@ function hlaska(text, druh = '') {
   e.innerHTML = `<svg class="icon"><use href="#${druh === 'chyba' ? 'i-krizek' : 'i-fajfka'}"/></svg><span>${esc(text)}</span>`;
   $('#hlasky').append(e);
   setTimeout(() => e.remove(), druh === 'chyba' ? 6500 : 2400);
+}
+
+/* Hláška, která zůstane viset, dokud ji sami neodklidíme — na průběh nahrávání. */
+function hlaskaPrubeh(text) {
+  const e = document.createElement('div');
+  e.className = 'hlaska';
+  e.innerHTML = `<span class="tocitko"></span><span></span>`;
+  e.lastElementChild.textContent = text;
+  $('#hlasky').append(e);
+  return {
+    text: (t) => { e.lastElementChild.textContent = t; },
+    pryc: () => e.remove(),
+  };
 }
 
 /* ---------------------------------------------------------- ukládání */
@@ -379,11 +480,14 @@ function karta(z) {
         <div class="karta-odkazy">
           ${chipOdkaz('i-foto', 'Fotky', z.fotky, z.id, 'fotky')}
           ${chipOdkaz('i-kostka', 'Vizualizace', z.vizualizace, z.id, 'vizualizace')}
+          ${chipOdkaz('i-3d', '3D prohlídka', z.prohlidka3d, z.id, 'prohlidka3d')}
         </div>
 
         <footer class="karta-pata">
           <span class="${siroka ? 'ma' : ''}">${siroka}× SREALITY</span>
           <span class="${vysoka ? 'ma' : ''}">${vysoka}× REELS</span>
+          ${z.pudorysy.length ? `<span class="ma">${z.pudorysy.length}× PŮDORYS</span>` : ''}
+          ${z.bannery.length ? `<span class="ma">${z.bannery.length}× BANNER</span>` : ''}
           ${komentaru ? `<span class="vpravo"><svg class="icon"><use href="#i-komentar"/></svg>${komentaru}</span>` : ''}
         </footer>
 
@@ -442,6 +546,7 @@ function vykresliSuplik() {
   if (rozepsany) $('#novy-komentar', suplik).value = rozepsany;
   if (posun) $('.suplik-telo', suplik).scrollTop = posun;
   $$('[data-nahled]', suplik).forEach(dopnutiNahledu);
+  $$('[data-soubor]', suplik).forEach(dopnutiSouboru);
   $$('textarea', suplik).forEach(dorovnej);
 }
 
@@ -478,6 +583,7 @@ function htmlDetail(z) {
         <div class="odkazy">
           ${dlazdiceOdkaz('i-foto', 'Fotky', z.fotky, 'fotky')}
           ${dlazdiceOdkaz('i-kostka', 'Vizualizace', z.vizualizace, 'vizualizace')}
+          ${dlazdiceOdkaz('i-3d', '3D prohlídka', z.prohlidka3d, 'prohlidka3d')}
           ${z.odkazy.map((o) => `
             <a class="chip" href="${esc(o.url)}" target="_blank" rel="noopener">
               <svg class="icon"><use href="#i-odkaz"/></svg>
@@ -486,6 +592,9 @@ function htmlDetail(z) {
             </a>`).join('')}
         </div>
       </div>
+
+      ${blokSouboru(z, 'pudorysy')}
+      ${blokSouboru(z, 'bannery')}
 
       <div class="blok">
         <div class="blok-hlava">
@@ -518,6 +627,40 @@ function htmlDetail(z) {
 
       <div class="blok" style="padding-bottom:32px">
         <button class="mini zrus" data-akce="smazat-zakazku"><svg class="icon"><use href="#i-kos"/></svg> Smazat zakázku</button>
+      </div>
+    </div>`;
+}
+
+function blokSouboru(z, sekce) {
+  const { popis, jednotne } = SEKCE[sekce];
+  const soubory = z[sekce] || [];
+  return `
+    <div class="blok">
+      <div class="blok-hlava">
+        <h3>${esc(popis)}</h3><span class="pocitadlo">${soubory.length}</span>
+        <button class="pridat vpravo" data-akce="nahrat" data-sekce="${sekce}">
+          <svg class="icon"><use href="#i-nahrat"/></svg> Nahrát
+        </button>
+      </div>
+      ${soubory.length
+        ? `<div class="soubory">${soubory.map((f) => dlazdiceSouboru(f, sekce)).join('')}</div>`
+        : `<p class="prazdna-poznamka">Zatím tu žádný ${esc(jednotne)} není. Nahraj obrázek nebo PDF.</p>`}
+    </div>`;
+}
+
+function dlazdiceSouboru(f, sekce) {
+  const obrazek = (f.typ || '').startsWith('image/');
+  return `
+    <div class="soubor">
+      <a class="soubor-nahled nacita" target="_blank" rel="noopener"
+         data-soubor="${esc(f.cesta)}" data-typ="${esc(f.typ || '')}" title="${esc(f.nazev)}">
+        ${obrazek ? '' : `<span class="soubor-typ">${esc(pripona(f.nazev).toUpperCase())}</span>`}
+      </a>
+      <div class="soubor-pata">
+        <span class="soubor-nazev" title="${esc(f.nazev)}">${esc(f.nazev)}</span>
+        <button class="soubor-smazat" data-akce="smazat-soubor" data-sekce="${sekce}" data-sid="${esc(f.id)}" aria-label="Smazat ${esc(f.nazev)}">
+          <svg class="icon"><use href="#i-krizek"/></svg>
+        </button>
       </div>
     </div>`;
 }
@@ -738,10 +881,12 @@ async function akce(jmeno, prvek) {
   if (jmeno === 'odkaz') {
     const z = najdi(d.id || UI.otevrena);
     if (!z) return;
-    const popis = d.klic === 'fotky' ? 'Fotky' : 'Vizualizace';
+    const popis = { fotky: 'Fotky', vizualizace: 'Vizualizace', prohlidka3d: '3D prohlídka' }[d.klic] || 'Odkaz';
     const v = await dialog({
       titulek: popis,
-      popis: 'Vlož odkaz na Google Drive, Úschovnu, Zoner, galerii — cokoliv, co se dá otevřít v prohlížeči.',
+      popis: d.klic === 'prohlidka3d'
+        ? 'Vlož odkaz na 3D prohlídku — otevře se v novém okně.'
+        : 'Vlož odkaz na Google Drive, Úschovnu, Zoner, galerii — cokoliv, co se dá otevřít v prohlížeči.',
       pole: [{ klic: 'url', label: 'Odkaz', typ: 'url', hodnota: z[d.klic] || '', placeholder: 'https://…' }],
     });
     if (!v) return;
@@ -795,6 +940,54 @@ async function akce(jmeno, prvek) {
     localStorage.setItem('kokpit.filtr', UI.filtr);
     vykresli();
     return hlaska(hotove ? 'Přesunuto mezi hotové.' : 'Zpátky mezi aktivními.', 'uspech');
+  }
+
+  if (jmeno === 'nahrat') {
+    const sekce = d.sekce;
+    const soubory = await vyberSoubory();
+    if (!soubory.length) return;
+
+    const velky = soubory.find((f) => f.size > MAX_SOUBOR);
+    if (velky) return hlaska(`„${velky.name}" má přes 10 MB. Zmenši ho a zkus to znovu.`, 'chyba');
+
+    const prubeh = hlaskaPrubeh('Nahrávám…');
+    const nahrane = [];
+    try {
+      for (const [i, f] of soubory.entries()) {
+        prubeh.text(`Nahrávám ${i + 1} z ${soubory.length} — ${f.name}`);
+        const id = uid('s');
+        const cesta = `soubory/${z.id}/${id}.${pripona(f.name)}`;
+        await nahrajDoRepa(cesta, await souborNaB64(f), `${stitek(z)} — ${SEKCE[sekce].jednotne}: ${f.name}`);
+        nahrane.push({ id, nazev: f.name, cesta, typ: f.type || '' });
+      }
+      prubeh.text('Ukládám…');
+      const ok = await ulozZakazku(
+        `${stitek(z)} — ${SEKCE[sekce].popis.toLowerCase()} (${nahrane.length})`,
+        z.id,
+        (x) => { x[sekce] = [...(x[sekce] || []), ...nahrane]; });
+      if (!ok) throw new Error('Soubory se nahrály, ale zápis do zakázky selhal.');
+      hlaska(nahrane.length === 1 ? 'Nahráno.' : `Nahráno ${nahrane.length} souborů.`, 'uspech');
+    } catch (e) {
+      /* Ať v repu nezůstanou soubory, které k žádné zakázce nepatří. */
+      for (const n of nahrane) { try { await smazZRepa(n.cesta, 'Úklid nedokončeného nahrávání'); } catch {} }
+      hlaska(e.message || 'Nahrání se nepovedlo.', 'chyba');
+    } finally {
+      prubeh.pryc();
+    }
+    return;
+  }
+
+  if (jmeno === 'smazat-soubor') {
+    const sekce = d.sekce;
+    const f = (z[sekce] || []).find((x) => x.id === d.sid);
+    if (!f) return;
+    if (!await potvrd({ titulek: 'Smazat soubor?', popis: `„${f.nazev}" zmizí ze zakázky.`, okText: 'Smazat' })) return;
+    if (!await ulozZakazku(`${stitek(z)} — smazán ${SEKCE[sekce].jednotne} ${f.nazev}`, z.id,
+      (x) => { x[sekce] = (x[sekce] || []).filter((y) => y.id !== f.id); })) return;
+    const url = blobUrl.get(f.cesta);
+    if (url) { URL.revokeObjectURL(url); blobUrl.delete(f.cesta); }
+    try { await smazZRepa(f.cesta, `Smazán soubor ${f.nazev}`); } catch { /* záznam je pryč, zbytek nevadí */ }
+    return;
   }
 
   if (jmeno === 'pridat-odkaz') {
