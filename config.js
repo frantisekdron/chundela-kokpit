@@ -24,7 +24,7 @@ window.CFG = {
   },
   "iterace": 600000,
   "blobs": {
-    "studio": "bl66x9dqfCeSWQyykbt/JW5a0W69ExhMLosrUu+oM6XtqGmdtHveUrOZk1cTEjqjXkowSplS8FWx1tuLAE6W62wTQnmFsdXHKBqY58rOLWugHGY/NSk0Al5AO3BM1JC256jN/F23g3HOKVXQq8Y19U9Idh6BgFNiWKKQVmFZj7YIMxnhCandklA=",
-    "klient": "7qjigRmhkM1lcex0FgRL5M1y9VmosQw5UZjlw6vd7/H1kUTO3iCGzq1rLDaPwU6MRWpqqJk6z/7+tA1mb/j8lRsWQetExvoaFNdfB1gq/cyfpa9vyJZltyCX68vAkF9nkGXMjZM50TnYbt/KAL4uPPvc84yWQzgADmiVX/kAWdQiobfoMhOXZjs="
+    "studio": "ucOBfQz0GTVHDRDXhdvcEddxX4A5oyHvwIPy/A/+6X1x9lEr6RJ+vGkGRonZkja2puJAHjZcIXUYHn/BReGUFPVDreff5oUwtld/3VploarJBjT10opZIN+ZnSY8+6JW+w88LpQ14akyROE1M3q6glUf0Rk+a5qsmseKuBPyVaU/VWv6xy6eKyY=",
+    "klient": "TifhgTTzJeSs3jXbimCyg2ejU+R4QP3fS+I+VwnW1DZ8tzU9QRZOZ5hgKME18niz0m1FFmdOyvIuJtO0iZQMRSQcCRiFKQtzcIR8tBWyAXWGd5HzYi+850UQR3oFVwB8Ur/0kixA+vDTE+BVmbF16uQ4nBv2Ig4Dq6tN2jrvk6Bg+5bY8uM1faY="
   }
 };
