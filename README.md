@@ -8,24 +8,22 @@ v privátním repu `frantisekdron/chundela-data`.
 
 ## Co v tom je
 
-Zakázka je **aktivní** nebo **hotová** a nese čtyři věci:
+Zakázka je **aktivní** nebo **hotová** a nese:
 
-- odkaz na **fotky** a odkaz na **vizualizace** (plus libovolné další odkazy),
+- **odkazy** — fotky, vizualizace, 3D prohlídka a libovolné další,
+- **půdorysy** a **reklamní bannery** — nahrané soubory s náhledem,
 - **videa** — každé označené 16:9 pro Sreality nebo 9:16 pro reels, přehrají se přímo na stránce,
-- **poznámku**,
-- **komentáře** obou stran.
+- **poznámku** a **komentáře** obou stran.
 
-U zakázky jsou odkazy na fotky, vizualizace a 3D prohlídku, nahrané
-půdorysy a reklamní bannery, videa z Vimea a komentáře. Obě strany
-můžou cokoliv přidat, upravit i smazat.
+Obě strany můžou cokoliv přidat, upravit i smazat.
 
-Půdorysy a bannery se nahrávají přímo do privátního repa (`soubory/`),
-takže nikde nevisí veřejně — kokpit si je stahuje přístupovým klíčem.
-Na soubor platí limit 10 MB.
+Půdorysy a bannery (obrázky i PDF) se nahrávají přímo do privátního repa
+do složky `soubory/`, takže nikde nevisí veřejně — kokpit si je stahuje
+přístupovým klíčem a ukazuje jako náhledy. Na soubor platí limit 10 MB.
 
-Nahoře vpravo je **ceník** — sazby za natáčení, fotky, reels, dotáčení
-a příplatky plus dodací podmínky. Řádky se dají klikem upravit, přidat
-i smazat.
+V řadě se záložkami Aktivní / Hotové je **ceník** — sazby za natáčení,
+fotky, reels, dotáčení a příplatky plus dodací podmínky. Řádky se dají
+klikem upravit, přidat i smazat.
 
 ## Jak to funguje
 
