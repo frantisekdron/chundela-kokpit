@@ -272,6 +272,13 @@ function srovnejPrednosti(seznam) {
 
 const odkazMapy = (adresa) => `https://mapy.cz/zakladni?q=${encodeURIComponent(adresa)}`;
 
+/* Odkaz vložený bez https:// (třeba „sreality.cz/detail/…“) dostane https://. */
+const jakoOdkaz = (t) => {
+  const s = String(t || '').trim();
+  return !s || /^[a-z][a-z0-9+.-]*:\/\//i.test(s) || /\s/.test(s) || !s.includes('.') ? s : 'https://' + s;
+};
+const jeOdkaz = (url) => !url || /^https?:\/\/\S+$/i.test(url);
+
 /* Nápady na scénář se dělí na tři druhy videa. Barva drží skupinu
    pohromadě, ať se nápady pro různá videa nepletou. */
 const DRUHY_NAPADU = {
@@ -290,8 +297,8 @@ function normalizuj(z) {
     const o = z.odkazy;
     z.fotky = z.fotky || o.fotky || '';
     z.vizualizace = z.vizualizace || o.vizualizace || '';
+    z.inzerat = z.inzerat || o.inzerat || '';
     z.odkazy = [
-      ...(o.inzerat ? [{ nazev: 'Inzerát', url: o.inzerat }] : []),
       ...(o.podklady ? [{ nazev: 'Podklady', url: o.podklady }] : []),
       ...(z.dalsiOdkazy || []),
     ];
@@ -300,6 +307,7 @@ function normalizuj(z) {
   z.odkazy = (z.odkazy || []).map((o) => ({ id: o.id || 'o-' + encodeURIComponent(o.url || o.nazev || ''), nazev: o.nazev, url: o.url }));
   z.prohlidka3d = z.prohlidka3d || '';
   z.adresa = z.adresa || '';
+  z.inzerat = z.inzerat || '';
   z.prednosti = srovnejPrednosti(z.prednosti);
   z.pudorysy = z.pudorysy || [];
   z.bannery = z.bannery || [];
@@ -688,6 +696,7 @@ function karta(z) {
         </dl>
 
         <div class="karta-odkazy">
+          ${chipOdkaz('i-dum', 'Inzerát', z.inzerat, z.id, 'inzerat')}
           ${chipOdkaz('i-foto', 'Fotky', z.fotky, z.id, 'fotky')}
           ${chipOdkaz('i-kostka', 'Vizualizace', z.vizualizace, z.id, 'vizualizace')}
           ${chipOdkaz('i-3d', '3D prohlídka', z.prohlidka3d, z.id, 'prohlidka3d')}
@@ -839,6 +848,11 @@ function htmlDetail(z) {
         <label for="p-adresa">Adresa</label>
         <input class="vstup adresa-vstup" id="p-adresa" data-pole="adresa" value="${esc(z.adresa)}" placeholder="Ulice a číslo, obec" autocomplete="off">
         ${z.adresa ? `<a class="mini" href="${esc(odkazMapy(z.adresa))}" target="_blank" rel="noopener"><svg class="icon"><use href="#i-pin"/></svg> Mapy</a>` : ''}
+      </div>
+      <div class="sh-datum">
+        <label for="p-inzerat">Inzerát</label>
+        <input class="vstup adresa-vstup" id="p-inzerat" data-pole="inzerat" value="${esc(z.inzerat)}" placeholder="Odkaz na inzerát — Sreality, web realitky…" inputmode="url" autocomplete="off" spellcheck="false">
+        ${z.inzerat ? `<a class="mini" href="${esc(z.inzerat)}" target="_blank" rel="noopener"><svg class="icon"><use href="#i-odkaz"/></svg> Otevřít</a>` : ''}
       </div>
       <div class="sh-datum">
         <label for="p-nataceno">Natáčeno</label>
@@ -1237,16 +1251,18 @@ async function akce(jmeno, prvek) {
   if (jmeno === 'odkaz') {
     const z = najdi(d.id || UI.otevrena);
     if (!z) return;
-    const popis = { fotky: 'Fotky', vizualizace: 'Vizualizace', prohlidka3d: '3D prohlídka' }[d.klic] || 'Odkaz';
+    const popis = { inzerat: 'Inzerát', fotky: 'Fotky', vizualizace: 'Vizualizace', prohlidka3d: '3D prohlídka' }[d.klic] || 'Odkaz';
     const v = await dialog({
       titulek: popis,
-      popis: d.klic === 'prohlidka3d'
-        ? 'Vlož odkaz na 3D prohlídku — otevře se v novém okně.'
+      popis: d.klic === 'inzerat' ? 'Vlož odkaz na inzerát — Sreality, Bezrealitky, web realitky.'
+        : d.klic === 'prohlidka3d' ? 'Vlož odkaz na 3D prohlídku — otevře se v novém okně.'
         : 'Vlož odkaz na Google Drive, Úschovnu, Zoner, galerii — cokoliv, co se dá otevřít v prohlížeči.',
-      pole: [{ klic: 'url', label: 'Odkaz', typ: 'url', hodnota: z[d.klic] || '', placeholder: 'https://…' }],
+      pole: [{ klic: 'url', label: 'Odkaz', hodnota: z[d.klic] || '', placeholder: 'https://…' }],
     });
     if (!v) return;
-    return ulozZakazku(`${stitek(z)} — ${popis.toLowerCase()}`, z.id, (x) => { x[d.klic] = v.url; });
+    const url = jakoOdkaz(v.url);
+    if (!jeOdkaz(url)) return hlaska('Tohle nevypadá jako odkaz — zkopíruj ho z adresního řádku prohlížeče.', 'chyba');
+    return ulozZakazku({ nadpis: `${stitek(z)} — ${popis.toLowerCase()}`, detail: url }, z.id, (x) => { x[d.klic] = url; });
   }
 
   /* ----- ceník ----- */
@@ -1625,6 +1641,7 @@ async function novaZakazka() {
       { klic: 'nazev', label: 'Název', hodnota: '', placeholder: 'Např. Vinohrady — Bělehradská' },
       { klic: 'podnazev', label: 'Popis', hodnota: '', placeholder: 'Např. Byt 3+kk · 92 m² · Praha 2' },
       { klic: 'adresa', label: 'Adresa', hodnota: '', placeholder: 'Ulice a číslo, obec' },
+      { klic: 'inzerat', label: 'Inzerát', hodnota: '', placeholder: 'Odkaz na inzerát — nemusí být hned' },
       { klic: 'nataceno', label: 'Natáčeno', typ: 'date', hodnota: '' },
       {
         klic: 'kod', label: 'ID zakázky', hodnota: '', placeholder: 'Nechat prázdné',
@@ -1641,6 +1658,7 @@ async function novaZakazka() {
     nazev: v.nazev,
     podnazev: v.podnazev,
     adresa: v.adresa,
+    inzerat: jeOdkaz(jakoOdkaz(v.inzerat)) ? jakoOdkaz(v.inzerat) : '',
     prednosti: [],
     nataceno: v.nataceno,
     stav: 'aktivni',
@@ -1678,9 +1696,15 @@ async function ulozPoleHned(prvek) {
   const z = najdi(UI.otevrena);
   if (!z) return;
   const klic = prvek.dataset.pole;
-  const nova = ['nazev', 'kod', 'adresa'].includes(klic) ? prvek.value.trim()
+  const nova = klic === 'inzerat' ? jakoOdkaz(prvek.value)
+    : ['nazev', 'kod', 'adresa'].includes(klic) ? prvek.value.trim()
     : klic === 'podnazev' ? prvek.value.replace(/\s+$/, '') : prvek.value;
-  if (klic === 'nazev' && !nova) { prvek.value = z.nazev; return; }  /* zakázka bez názvu by na nástěnce zmizela */
+  if (klic === 'nazev' && !nova) { prvek.value = z.nazev; return; }
+  if (klic === 'inzerat' && !jeOdkaz(nova)) {
+    hlaska('Tohle nevypadá jako odkaz — zkopíruj ho z adresního řádku prohlížeče.', 'chyba');
+    prvek.value = z.inzerat;
+    return;
+  }  /* zakázka bez názvu by na nástěnce zmizela */
   if (klic === 'nataceno' && nova && !/^(19|20)\d\d-\d\d-\d\d$/.test(nova)) {
     hlaska('Tohle datum nevypadá správně, neuložil jsem ho.', 'chyba');
     prvek.value = z.nataceno || '';
@@ -1701,7 +1725,7 @@ async function ulozPoleHned(prvek) {
     });
     if (!prepsat) { vykresliSuplik(); return; }
   }
-  const nazvy = { nazev: 'název', podnazev: 'popis', kod: 'ID zakázky', nataceno: 'datum natáčení', adresa: 'adresa' };
+  const nazvy = { nazev: 'název', podnazev: 'popis', kod: 'ID zakázky', nataceno: 'datum natáčení', adresa: 'adresa', inzerat: 'inzerát' };
   /* V souhrnu je vidět i nová hodnota, ne jen „změnil název“. Štítek se vezme
      před změnou, ať nadpis i řádek „Zakázka:“ mluví o téže zakázce. */
   const hodnota = klic === 'nataceno' ? denCesky(nova) : nova;

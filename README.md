@@ -14,7 +14,7 @@ vyřešit. Každá položka jde odškrtnout a volitelně navázat na zakázku.
 Pod tím jsou **zakázky** v pořadí, jaké si kdo přetáhne (na mobilu šipkami).
 Zakázka je **aktivní** nebo **hotová** a nese:
 
-- **popis** nahoře (víc řádků) a **adresa** s odkazem do Mapy.cz,
+- **popis** nahoře (víc řádků), **adresa** s odkazem do Mapy.cz a **inzerát** (odkaz na Sreality nebo web realitky — na kartě je to první tlačítko),
 - **TOP přednosti** — štítky (bazén, les za plotem…); klik na štítek na kartě ukáže všechny zakázky se stejnou předností,
 - **odkazy** — fotky, vizualizace, 3D prohlídka a libovolné další,
 - **půdorysy** — nahrané soubory s náhledem,
